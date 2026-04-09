@@ -5359,7 +5359,7 @@ async function _pfetch(service, path, opts){
     dexscreener:'https://api.dexscreener.com',binance:'https://fapi.binance.com',coingecko:'https://api.coingecko.com'};
   if(!url) url=(svcBase[service]||'')+path;
   try{
-    var res=await fetch(url,Object.assign({signal:AbortSignal.timeout(12000)},isV?{}:opts||{}));
+    var res=await fetch(url,Object.assign({signal:AbortSignal.timeout(12000)},opts||{}));
     if(!res.ok) return null;
     return await res.json();
   }catch(e){return null;}
@@ -5481,7 +5481,7 @@ async function stage1_collectTickers(maxN){
         // coins + markets 병렬
         var _cg_isV=window.location.hostname&&!['localhost','127.0.0.1',''].includes(window.location.hostname)&&window.location.protocol!=='file:';
         var _cgFetch=function(path){
-          if(_cg_isV) return fetch('/api/proxy?service=coinglass&path='+encodeURIComponent(path),{signal:AbortSignal.timeout(10000)});
+          if(_cg_isV) return fetch('/api/proxy?service=coinglass&path='+encodeURIComponent(path),{headers:{'CG-API-KEY':getCGKey()},signal:AbortSignal.timeout(10000)});
           return fetch(CG4+path,{headers:{'CG-API-KEY':getCGKey()},signal:AbortSignal.timeout(8000)});
         };
         var [coinsRes, mktsRes] = await Promise.all([
@@ -5592,7 +5592,7 @@ async function stage2_mapCA(ticker){
         var _as=window.location.hostname&&!['localhost','127.0.0.1',''].includes(window.location.hostname)&&window.location.protocol!=='file:';
         var _asp='/intelligence/search?query='+encodeURIComponent(sym)+'&filterLimits='+encodeURIComponent('{"tokens":5}');
         var _asu=_as?'/api/proxy?service=arkham&path='+encodeURIComponent(_asp):ARK+_asp;
-        var _asOpts=_as?{signal:AbortSignal.timeout(8000)}:{headers:{'API-Key':getArkhamKey()},signal:AbortSignal.timeout(8000)};
+        var _asOpts=_as?{headers:{'API-Key':getArkhamKey()},signal:AbortSignal.timeout(8000)}:{headers:{'API-Key':getArkhamKey()},signal:AbortSignal.timeout(8000)};
         return fetch(_asu,_asOpts);
       })();
       var d2=await res2.json();
@@ -5673,7 +5673,7 @@ async function stage3_analyze(tokenInfo, hours){
       var _a3isV=window.location.hostname&&!['localhost','127.0.0.1',''].includes(window.location.hostname)&&window.location.protocol!=='file:';
         var _a3path='/transfers?from=type:cex&tokens='+arkCh+':'+ca+'&timeLast='+tLast+'&usdGte=500&limit=100&sortKey=usd&sortDir=desc';
         var _a3url=_a3isV?'/api/proxy?service=arkham&path='+encodeURIComponent(_a3path):ARK+_a3path;
-        var _a3opts=_a3isV?{signal:AbortSignal.timeout(12000)}:{headers:{'API-Key':getArkhamKey()},signal:AbortSignal.timeout(12000)};
+        var _a3opts=_a3isV?{headers:{'API-Key':getArkhamKey()},signal:AbortSignal.timeout(12000)}:{headers:{'API-Key':getArkhamKey()},signal:AbortSignal.timeout(12000)};
         var arkRes=await fetch(_a3url,_a3opts);
       var arkD=await arkRes.json();
       if(arkD.transfers&&arkD.transfers.length){
