@@ -475,10 +475,84 @@ tr:last-child td{border-bottom:none;}
     <input type="hidden" id="hCaEth"><input type="hidden" id="hCaArb">
     <input type="hidden" id="hCaPoly"><input type="hidden" id="hCaBase">
   </div>
+
+  <!-- 진행바 -->
+  <div class="prog">
+    <div class="prog-row">
+      <span class="prog-msg" id="hMsg">CA 입력 후 홀더 분석 시작</span>
+      <span class="prog-pct" id="hPct">—</span>
+    </div>
+    <div class="prog-bar"><div class="prog-fill" id="hFill"></div></div>
+  </div>
+  <div class="log" id="hLog" style="display:none;"></div>
+
+  <!-- 토큰 정보 -->
+  <div id="hInfo" style="display:none;padding:10px 24px;background:var(--bg2);border-bottom:1px solid var(--bd);">
+    <span style="font-size:13px;font-weight:700;" id="hiName">—</span>
+    <span style="font-size:12px;color:var(--text2);margin-left:12px;">공급: <span id="hiSup">—</span></span>
+    <span style="font-size:12px;color:var(--text2);margin-left:12px;">홀더: <span id="hiHold">—</span></span>
+    <span style="font-size:12px;color:var(--text2);margin-left:12px;">집중도: <span id="hiConc">—</span></span>
+    <span style="font-size:12px;color:var(--text2);margin-left:12px;" id="hiCartel"></span>
+  </div>
+
+  <!-- 경고 -->
+  <div id="hAlert" style="display:none;padding:10px 24px;background:rgba(255,26,60,.03);border-bottom:1px solid rgba(255,26,60,.15);">
+    <div id="hAlertBody"></div>
+  </div>
+
+  <!-- 통계 -->
+  <div class="stats">
+    <div class="st"><div class="stl">🔥소각</div><div class="stv" id="hsBurn">0</div></div>
+    <div class="st"><div class="stl">🏦거래소</div><div class="stv" id="hsEx">0</div></div>
+    <div class="st"><div class="stl">🔁LP</div><div class="stv" id="hsLp">0</div></div>
+    <div class="st"><div class="stl">🚨팀</div><div class="stv" style="color:var(--bear)" id="hsTeam">0</div></div>
+    <div class="st"><div class="stl">⚡세력</div><div class="stv" style="color:var(--bear)" id="hsCartel">0</div></div>
+    <div class="st"><div class="stl">🐋고래</div><div class="stv" id="hsWhale">0</div></div>
+    <div class="st"><div class="stl">📈매집</div><div class="stv" id="hsAcc">0</div></div>
+    <div class="st"><div class="stl">🤝개인</div><div class="stv" id="hsPriv">0</div></div>
+    <div class="st"><div class="stl">합계</div><div class="stv" id="hsTot">0</div></div>
+  </div>
+
+  <!-- AI 패널 -->
+  <div class="ai-panel" id="aiPanelH">
+    <div class="ai-panel-hdr" onclick="toggleAiPanel('H')">
+      <span style="font-size:18px;">🤖</span>
+      <div class="ai-panel-title">AI 홀더 분석</div>
+      <span id="aiPanelHArrow" style="color:#9b59b6;margin-left:auto;font-size:14px;">▼</span>
+    </div>
+    <div id="aiPanelHBody">
+      <div class="ai-thinking" id="aiThinkH" style="display:none;"><div class="ai-dots"><span>●</span><span>●</span><span>●</span></div> AI 분석 중...</div>
+      <div class="ai-panel-body" id="aiResultH" style="display:none;"></div>
+    </div>
+  </div>
+
+  <!-- 필터 -->
+  <div class="fbar">
+    <span class="flt">FILTER</span>
+    <button class="fb fa" onclick="setHF('ALL',this)">ALL</button>
+    <button class="fb fc" onclick="setHF('PRIV',this)">🤝 개인지갑</button>
+    <button class="fb fc" onclick="setHF('DANGER',this)">🚨 위험</button>
+    <button class="fb fc" onclick="setHF('CARTEL',this)">⚡ 세력</button>
+    <button class="fb fw" onclick="setHF('WHALE',this)">🐋 고래</button>
+    <button class="fb" onclick="setHF('EXCH',this)">거래소</button>
+    <button class="fb" onclick="setHF('LP',this)">LP</button>
+    <div class="rct" id="hRct"></div>
+  </div>
+
+  <div class="tw">
+    <div class="emp" id="hEmp">
+      <div class="eico">📊</div>
+      <div class="et">홀더 분석 대기 중</div>
+      <div class="es">
+        <b style="color:var(--cyan)">CA를 입력하고 홀더 분석</b>을 시작하세요<br>
+        Etherscan Pro V2 tokenholderlist 기반<br>
+        거래소·LP·팀·개인지갑 자동 분류
+      </div>
+    </div>
     <table id="hTbl" style="display:none;">
       <thead><tr>
         <th>순위</th><th>주소</th><th>보유량</th><th>공급%</th>
-        <th>유형</th><th>패턴</th><th>출처</th><th>위험</th><th>링크 / 상세</th>
+        <th>유형</th><th>AI분류</th><th>패턴</th><th>출처</th><th>위험</th><th>링크 / 상세</th>
       </tr></thead>
       <tbody id="hBody"></tbody>
     </table>
@@ -735,6 +809,75 @@ tr:last-child td{border-bottom:none;}
 // ════════════════════════════════════════════════════════════
 
 var TRANSFER_TOPIC = '0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef';
+
+// ── 누락 변수/함수 보충 ──
+var CONTRACT_LABELS = {};
+var EVM_CHAIN = {ethereum:'eth',bsc:'bsc',arbitrum:'arb',base:'base',polygon:'poly',
+  'binance-smart-chain':'bsc','arbitrum-one':'arb','polygon-pos':'poly'};
+var EVM_OK = ['eth','bsc','arb','base','poly'];
+var CBADGE = {eth:'cb-eth',bsc:'cb-bsc',arb:'cb-arb',poly:'cb-poly',base:'cb-base'};
+var mAllRows = [], mCurFilter = 'ALL';
+
+function getCGKey(){ return (document.getElementById('kCoinGlass')||{}).value||''; }
+
+function syncCaFromInput(ca, chain){
+  if(!ca) return;
+  var lo = ca.trim().toLowerCase();
+  var map = {eth:'caEth',bsc:'caBsc',arb:'caArb',poly:'caPoly',base:'caBase'};
+  var hMap = {eth:'hCaEth',bsc:'hCaBsc',arb:'hCaArb',poly:'hCaPoly',base:'hCaBase'};
+  var dMap = {eth:'dCaEth',bsc:'dCaBsc',arb:'dCaArb',poly:'dCaPoly',base:'dCaBase'};
+  [map, hMap, dMap].forEach(function(m){
+    var el = document.getElementById(m[chain]);
+    if(el) el.value = lo;
+  });
+  var oTok = document.getElementById('oToken');
+  if(oTok && !oTok.value) oTok.value = lo;
+}
+
+function syncMinTok(val){
+  var el = document.getElementById('oMinTok');
+  if(el && val !== 'custom') el.value = val;
+}
+
+function oRisk(o){
+  if(o.usd>=1e6||o.amt>=1e8) return {lv:'crit',lbl:'🔴 극심',col:'var(--bear)'};
+  if(o.usd>=1e5||o.amt>=1e7) return {lv:'high',lbl:'🟠 높음',col:'var(--warn)'};
+  if(o.isPriv) return {lv:'med',lbl:'🟡 주의',col:'var(--gold)'};
+  return {lv:'low',lbl:'🟢 낮음',col:'var(--bull)'};
+}
+
+function updateNF(){
+  var byEx = {};
+  oTransfers.forEach(function(t){
+    if(!t.isPriv) return;
+    var ex = t.ex||'?';
+    if(!byEx[ex]) byEx[ex]={cnt:0,amt:0};
+    byEx[ex].cnt++; byEx[ex].amt += (t.amt||0);
+  });
+  var el = document.getElementById('oNF');
+  if(!el) return;
+  var keys = Object.keys(byEx).sort(function(a,b){return byEx[b].cnt-byEx[a].cnt;});
+  if(!keys.length){ el.innerHTML='<span style="font-size:9px;color:var(--text3);">추적 후 표시됩니다</span>'; return; }
+  el.innerHTML = keys.map(function(ex){
+    var d = byEx[ex];
+    return '<div class="nfc"><div class="nfv">'+d.cnt+'</div><div class="nfn">'+ex+'</div></div>';
+  }).join('');
+}
+
+function updateOStats(){
+  var priv=oTransfers.filter(function(t){return t.isPriv;});
+  var totalUsd=oTransfers.reduce(function(s,t){return s+(t.usd||0);},0);
+  var maxUsd=oTransfers.reduce(function(m,t){return (t.usd||0)>m?(t.usd||0):m;},0);
+  var crit=oTransfers.filter(function(t){return t.risk&&t.risk.lv==='crit';}).length;
+  document.getElementById('osOut').textContent='$'+fN(totalUsd);
+  document.getElementById('osTx').textContent=oTransfers.length;
+  document.getElementById('osPriv').textContent=priv.length;
+  document.getElementById('osExch').textContent=oTransfers.length-priv.length;
+  document.getElementById('osCrit').textContent=crit;
+  document.getElementById('osMax').textContent='$'+fN(maxUsd);
+}
+
+function fmtA(n){return n>=1e9?(n/1e9).toFixed(2)+'B':n>=1e6?(n/1e6).toFixed(2)+'M':n>=1e3?(n/1e3).toFixed(1)+'K':n.toFixed(0);}
 
 var CHAIN_EXP = {
   eth:'https://etherscan.io', bsc:'https://bscscan.com',
@@ -6147,3 +6290,60 @@ setTimeout(function(){
 },500);
 
 </script>
+
+<!-- 토스트 -->
+<div class="toast-wrap" id="toastWrap"></div>
+
+<!-- 상세 모달 -->
+<div id="detailModal" style="display:none;position:fixed;inset:0;z-index:9500;background:rgba(0,0,0,.88);overflow-y:auto;">
+  <div style="max-width:900px;margin:30px auto;padding:0 16px 60px;">
+    <div style="background:#050710;border:1px solid rgba(0,221,255,.2);border-radius:4px;overflow:hidden;">
+      <div style="padding:14px 22px;background:var(--bg2);border-bottom:1px solid var(--bd);display:flex;align-items:center;gap:12px;">
+        <span style="font-size:18px;">📋</span>
+        <div style="flex:1;">
+          <div style="font-size:16px;font-weight:700;color:var(--white);">전체 이력</div>
+          <div id="mAddr" style="font-size:11px;color:var(--text2);margin-top:2px;word-break:break-all;user-select:all;"></div>
+        </div>
+        <a id="mBscLink" href="#" target="_blank" style="font-size:11px;color:var(--cyan);text-decoration:none;">Explorer ↗</a>
+        <a id="mMsLink" href="#" target="_blank" style="font-size:11px;color:var(--gold);text-decoration:none;">MetaSleuth ↗</a>
+        <button onclick="closeModal()" style="padding:6px 14px;background:transparent;border:1px solid var(--bear);color:var(--bear);font-family:var(--mono);font-size:11px;cursor:pointer;border-radius:4px;">✕ 닫기</button>
+      </div>
+      <div id="mLoading" style="padding:30px;text-align:center;color:var(--text2);">로딩 중...</div>
+      <div id="mContent" style="display:none;">
+        <div style="display:grid;grid-template-columns:repeat(6,1fr);gap:0;border-bottom:1px solid var(--bd);">
+          <div class="st"><div class="stl">보유량</div><div class="stv" id="mHold">—</div><div style="font-size:10px;color:var(--text3);" id="mHoldPct"></div></div>
+          <div class="st"><div class="stl">총수신</div><div class="stv" style="color:var(--bull)" id="mTotalIn">—</div><div style="font-size:10px;color:var(--text3);" id="mInCnt"></div></div>
+          <div class="st"><div class="stl">총발신</div><div class="stv" style="color:var(--bear)" id="mTotalOut">—</div><div style="font-size:10px;color:var(--text3);" id="mOutCnt"></div></div>
+          <div class="st"><div class="stl">→거래소</div><div class="stv" style="color:var(--warn)" id="mToEx">—</div><div style="font-size:10px;color:var(--text3);" id="mToExCnt"></div></div>
+          <div class="st"><div class="stl">→개인</div><div class="stv" style="color:var(--cyan)" id="mToPriv">—</div><div style="font-size:10px;color:var(--text3);" id="mToPrivCnt"></div></div>
+          <div class="st"><div class="stl">거래소←</div><div class="stv" style="color:var(--bull)" id="mFromEx">—</div><div style="font-size:10px;color:var(--text3);" id="mFromExCnt"></div></div>
+        </div>
+        <div style="padding:8px 22px;border-bottom:1px solid var(--bd);display:flex;gap:6px;align-items:center;">
+          <button class="fb fa" id="mfAll" onclick="mFilter('ALL',this)">ALL</button>
+          <button class="fb" id="mfIn" onclick="mFilter('IN',this)">수신</button>
+          <button class="fb" id="mfOut" onclick="mFilter('OUT',this)">발신</button>
+          <button class="fb" id="mfEx" onclick="mFilter('EX',this)">거래소</button>
+          <button class="fb" id="mfPriv" onclick="mFilter('PRIV',this)">개인</button>
+          <span style="font-size:11px;color:var(--text3);margin-left:auto;" id="mfCount"></span>
+        </div>
+        <div style="overflow-x:auto;">
+          <table style="width:100%;border-collapse:collapse;font-size:12px;">
+            <thead><tr style="background:var(--bg3);">
+              <th style="padding:6px 8px;text-align:left;font-size:10px;color:var(--text2);">시간</th>
+              <th style="padding:6px 8px;font-size:10px;color:var(--text2);">방향</th>
+              <th style="padding:6px 8px;text-align:left;font-size:10px;color:var(--text2);">상대</th>
+              <th style="padding:6px 8px;font-size:10px;color:var(--text2);">유형</th>
+              <th style="padding:6px 8px;text-align:right;font-size:10px;color:var(--text2);">수량</th>
+              <th style="padding:6px 8px;text-align:right;font-size:10px;color:var(--text2);">잔액</th>
+              <th style="padding:6px 8px;font-size:10px;color:var(--text2);">TX</th>
+            </tr></thead>
+            <tbody id="mTbody"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+</body>
+</html>
