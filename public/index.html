@@ -5628,21 +5628,12 @@ async function stage1_collectTickers(maxN){
           if(_cg_isV) return fetch('/api/proxy?service=coinglass&path='+encodeURIComponent(path),{headers:{'CG-API-KEY':getCGKey()},signal:AbortSignal.timeout(10000)});
           return fetch(CG4+path,{headers:{'CG-API-KEY':getCGKey()},signal:AbortSignal.timeout(8000)});
         };
-        var [coinsRes, mktsRes] = await Promise.all([
-          _cgFetch('/api/futures/coins'),
-          _cgFetch('/api/futures/coins-markets')
-        ]);
+        var coinsRes = await _cgFetch('/api/futures/supported-coins');
         var coinsD = coinsRes.ok ? await coinsRes.json() : {data:[]};
-        var mktsD  = mktsRes.ok  ? await mktsRes.json()  : {data:[]};
-        var mktMap = {};
-        (mktsD.data||[]).forEach(function(m){
-          mktMap[(m.symbol||m.coin||'').toUpperCase()]={oi:parseFloat(m.openInterest||0),vol:parseFloat(m.volUsd||0)};
-        });
         (coinsD.data||[]).forEach(function(c){
           var sym=(c.symbol||c.coin||c||'').toUpperCase();
           if(sym&&!EXCLUDE.has(sym)){
-            var m=mktMap[sym]||{oi:0,vol:0};
-            results.push({sym:sym,oi:m.oi,vol:m.vol,src:'coinglass'});
+            results.push({sym:sym,oi:0,vol:0,src:'coinglass'});
           }
         });
         smtLog('✓ CoinGlass: '+results.length+'개 티커','ok');
@@ -5653,10 +5644,10 @@ async function stage1_collectTickers(maxN){
     })();
   }
 
-  // Binance 병렬 실행
-  smtLog('Binance Futures 티커 수집 중...','dim');
+  // Binance 병렬 실행 (spot API — 지역 제한 없음)
+  smtLog('Binance Spot 티커 수집 중...','dim');
   var _bn_isV=window.location.hostname&&!['localhost','127.0.0.1',''].includes(window.location.hostname)&&window.location.protocol!=='file:';
-  var _bnUrl=_bn_isV?'/api/proxy?service=binance&path=/fapi/v1/ticker/24hr':'https://fapi.binance.com/fapi/v1/ticker/24hr';
+  var _bnUrl=_bn_isV?'/api/proxy?service=binance-spot&path=/api/v3/ticker/24hr':'https://api.binance.com/api/v3/ticker/24hr';
   bnPromise = fetch(_bnUrl,{signal:AbortSignal.timeout(10000)})
     .then(function(r){return r.json();})
     .then(function(bd){

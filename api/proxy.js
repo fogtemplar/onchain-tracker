@@ -6,12 +6,13 @@ export default async function handler(req, res) {
   }
 
   const BASE = {
-    etherscan:    'https://api.etherscan.io',
-    coinglass:    'https://open-api-v4.coinglass.com',
-    arkham:       'https://api.arkm.com',
-    dexscreener:  'https://api.dexscreener.com',
-    binance:      'https://fapi.binance.com',
-    coingecko:    'https://api.coingecko.com',
+    etherscan:      'https://api.etherscan.io',
+    coinglass:      'https://open-api-v4.coinglass.com',
+    arkham:         'https://api.arkm.com',
+    dexscreener:    'https://api.dexscreener.com',
+    binance:        'https://fapi.binance.com',
+    'binance-spot': 'https://api.binance.com',
+    coingecko:      'https://api.coingecko.com',
   };
 
   const base = BASE[service];
