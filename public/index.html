@@ -888,7 +888,7 @@ var CHAIN_ID   = {eth:1,bsc:56,arb:42161,poly:137,base:8453};
 var CHAIN_BPH  = {eth:7200,bsc:28800,arb:360000,poly:43200,base:43200};
 
 // Etherscan V2 무료 체인 (BSC=56·BASE=8453 유료)
-var ETH_FREE = {eth:true, arb:true, poly:true};
+var ETH_FREE = {eth:true, bsc:true, arb:true, poly:true, base:true};
 
 var ALCH_RPC = {
   eth: function(k){return 'https://eth-mainnet.g.alchemy.com/v2/'+k;},
@@ -1232,6 +1232,12 @@ function ethScanFetch(chain, params, key) {
 }
 
 function ethCall(chain, to, data) {
+  // Etherscan proxy eth_call 우선, 실패시 Alchemy 폴백
+  if(getEthKey()) {
+    return ethScan(chain,{module:'proxy',action:'eth_call',to:to,data:data,tag:'latest'}).then(function(r){
+      return r||'0x';
+    });
+  }
   return alchFetch(chain,'eth_call',[{to:to,data:data},'latest']);
 }
 
@@ -1882,32 +1888,18 @@ function detectContractType(addr, chain) {
     return Promise.resolve('DEX_PAIR');
   }
 
-  return alchFetch(chain,'eth_getCode',[addr,'latest']).then(function(code) {
+  // Etherscan proxy eth_getCode로 컨트랙트 여부 판별
+  return ethScan(chain,{module:'proxy',action:'eth_getCode',address:addr,tag:'latest'}).then(function(code) {
     if(!code || code==='0x' || code.length<10) {
       CONTRACT_LABELS[lo] = 'EOA';
       return 'EOA';
     }
-    // TX 카운트 조회 (높으면 프로토콜)
-    return alchFetch(chain,'eth_getTransactionCount',[addr,'latest']).then(function(txHex) {
-      var txCnt = parseInt(txHex||'0x0',16)||0;
-      if(txCnt>PROTOCOL_TX_THRESHOLD){
-        CONTRACT_LABELS[lo]='PROTOCOL'; return 'PROTOCOL';
-      }
-      // DEX pair: token0() 0x0dfe1681
-      return alchFetch(chain,'eth_call',[{to:addr,data:'0x0dfe1681'},'latest']).then(function(t0){
-        if(t0&&t0!=='0x'&&t0.length>=66){ CONTRACT_LABELS[lo]='DEX_PAIR'; return 'DEX_PAIR'; }
-        // Vesting: beneficiary() 0x38af3eed
-        return alchFetch(chain,'eth_call',[{to:addr,data:'0x38af3eed'},'latest']).then(function(ben){
-          if(ben&&ben!=='0x'&&ben.length>=66){ CONTRACT_LABELS[lo]='VESTING'; return 'VESTING'; }
-          // Multisig: getOwners() 0xa0e67e2b
-          return alchFetch(chain,'eth_call',[{to:addr,data:'0xa0e67e2b'},'latest']).then(function(own){
-            if(own&&own!=='0x'&&own.length>100){ CONTRACT_LABELS[lo]='MULTISIG'; return 'MULTISIG'; }
-            CONTRACT_LABELS[lo]='CONTRACT'; return 'CONTRACT';
-          });
-        });
-      });
+    // 코드 있으면 컨트랙트 — token0() 으로 DEX pair 감지
+    return ethCall(chain, addr, '0x0dfe1681').then(function(t0){
+      if(t0&&t0!=='0x'&&t0.length>=66){ CONTRACT_LABELS[lo]='DEX_PAIR'; return 'DEX_PAIR'; }
+      CONTRACT_LABELS[lo]='CONTRACT'; return 'CONTRACT';
     });
-  }).catch(function(){ return 'EOA'; });
+  }).catch(function(){ CONTRACT_LABELS[lo]='EOA'; return 'EOA'; });
 }
 
 var hHolders=[], oResults=[], hFiltered=[], hRunning=false, hStopFlag=false, hCurF='ALL';
@@ -1960,21 +1952,32 @@ function startHolder() {
 }
 
 function runHolderAnalysis(ca,chain,topN,alchKey,ethKey,useEth,exp,L) {
-  // Step 1: Alchemy 연결 확인
-  setProg('hFill','hMsg','hPct',2,'Alchemy 연결 확인 중...');
-  L('Alchemy '+CHAIN_NAME[chain]+' RPC 연결 중...','info');
+  // Alchemy 불필요 — Etherscan Pro V2로 직접 진행
+  setProg('hFill','hMsg','hPct',2,'Etherscan Pro 연결 중...');
 
-  alchFetch(chain,'eth_blockNumber',[]).then(function(bnRes) {
-    var latestBlock = bnRes&&typeof bnRes==='string'&&bnRes.startsWith('0x') ? parseInt(bnRes,16) : 0;
-    if(!latestBlock) {
-      L('❌ Alchemy 연결 실패 — 응답: '+JSON.stringify(bnRes||'없음').slice(0,80),'err');
-      L('→ Alchemy API 키 확인: dashboard.alchemy.com → Apps → View Key','warn');
-      setProg('hFill','hMsg','hPct',0,'❌ Alchemy 연결 실패');
-      endHolder(); return;
+  if(!getEthKey()) {
+    L('❌ Etherscan API 키가 없습니다. API 키 설정에 입력하세요.','err');
+    setProg('hFill','hMsg','hPct',0,'❌ Etherscan API 키 필요');
+    endHolder(); return;
+  }
+
+  // Etherscan proxy로 블록넘버 확인
+  ethScan(chain,{module:'proxy',action:'eth_blockNumber'}).then(function(bnRes) {
+    var latestBlock = 0;
+    if(bnRes && typeof bnRes==='string' && bnRes.startsWith('0x')) {
+      latestBlock = parseInt(bnRes,16);
     }
-    L('✓ 연결 성공 | '+CHAIN_NAME[chain]+' 최신 블록: '+latestBlock.toLocaleString(),'ok');
+    if(latestBlock) {
+      L('✓ Etherscan 연결 성공 | '+CHAIN_NAME[chain]+' 블록: '+latestBlock.toLocaleString(),'ok');
+    } else {
+      L('⚠ 블록넘버 조회 실패 — 홀더 분석은 계속 진행','warn');
+      latestBlock = 0;
+    }
     holderStep2(ca,chain,topN,alchKey,ethKey,useEth,exp,L,latestBlock);
-  }).catch(function(e){ L('❌ 오류: '+e.message,'err'); endHolder(); });
+  }).catch(function(e){
+    L('⚠ 블록넘버 오류: '+e.message+' — 홀더 분석 계속 진행','warn');
+    holderStep2(ca,chain,topN,alchKey,ethKey,useEth,exp,L,0);
+  });
 }
 
 function holderStep2(ca,chain,topN,alchKey,ethKey,useEth,exp,L,latestBlock) {
@@ -2686,15 +2689,10 @@ function finishHolder(sym,exp,L) {
 
 function analyzeNextChain(chain, ca, topN, L) {
   var ethKey = getEthKey();
-  var useEth = ETH_FREE[chain] && ethKey;
+  var useEth = ethKey;
   var exp = CHAIN_EXP[chain]||'';
-  alchFetch(chain,'eth_blockNumber',[]).then(function(bnRes) {
-    var latestBlock = bnRes&&typeof bnRes==='string'&&bnRes.startsWith('0x')?parseInt(bnRes,16):0;
-    if(!latestBlock){L('❌ '+CHAIN_NAME[chain]+' 연결 실패','err');finishHolder('','',L);return;}
-    L('✓ '+CHAIN_NAME[chain]+' 연결 | 블록: '+latestBlock.toLocaleString(),'ok');
-    // 토큰 정보 조회 후 홀더 스캔
-    holderStep2(ca,chain,topN,getAlchKey(),ethKey,useEth,exp,L,latestBlock);
-  });
+  L('✓ '+CHAIN_NAME[chain]+' 분석 시작','ok');
+  holderStep2(ca,chain,topN,'',ethKey,useEth,exp,L,0);
 }
 
 function stopHolder() { hStopFlag=true; }
