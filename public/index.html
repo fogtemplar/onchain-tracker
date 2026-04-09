@@ -5644,10 +5644,9 @@ async function stage1_collectTickers(maxN){
     })();
   }
 
-  // Binance 병렬 실행 (spot API — 지역 제한 없음)
+  // Binance 병렬 실행 (클라이언트 직접 호출 — Binance CORS 허용, 프록시 미국 서버 차단 회피)
   smtLog('Binance Spot 티커 수집 중...','dim');
-  var _bn_isV=window.location.hostname&&!['localhost','127.0.0.1',''].includes(window.location.hostname)&&window.location.protocol!=='file:';
-  var _bnUrl=_bn_isV?'/api/proxy?service=binance-spot&path=/api/v3/ticker/24hr':'https://api.binance.com/api/v3/ticker/24hr';
+  var _bnUrl='https://api.binance.com/api/v3/ticker/24hr';
   bnPromise = fetch(_bnUrl,{signal:AbortSignal.timeout(10000)})
     .then(function(r){return r.json();})
     .then(function(bd){
