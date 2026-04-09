@@ -1215,7 +1215,7 @@ function alchFetch(chain, method, params, keyOverride) {
 
 function ethScanFetch(chain, params, key) {
   if(!key || !ETH_FREE[chain]) return Promise.resolve(null);
-  var chainIds = {eth:1,arb:42161,poly:137};
+  var chainIds = {eth:1,bsc:56,arb:42161,poly:137,base:8453};
   var cid = chainIds[chain];
   if(!cid) return Promise.resolve(null);
   var rawQ = new URLSearchParams(Object.assign({chainid:cid},params,{apikey:key})).toString();
@@ -1622,6 +1622,9 @@ function ethScan(chain, params, _retry) {
     .then(function(r){ return r.ok ? r.json() : null; })
     .then(function(d){
       if(!d) return null;
+      // proxy 모듈 응답 (jsonrpc 형식) — eth_blockNumber, eth_call 등
+      if(d.jsonrpc && d.result !== undefined) return d.result;
+      // 일반 V2 API 응답
       if(d.status==='1') return d.result;
       var msg = (d.result||d.message||'').toString();
       // Max rate limit → 1초 후 자동 재시도 (최대 3회)
