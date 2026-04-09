@@ -273,13 +273,13 @@ tr:last-child td{border-bottom:none;}
             <div class="klbl" style="color:#9b59b6;">AI 엔진 선택</div>
             <select class="sel" id="aiEngine" style="font-size:13px;width:220px;" onchange="updateAiHint()">
               <option value="claude">Claude Haiku 4.5 (권장·정밀)</option>
-              <option value="gemini">Gemini 1.5 Flash (최저가)</option>
+              <option value="gemini" selected>Gemini 1.5 Flash (최저가)</option>
               <option value="openai">GPT-4o mini (균형)</option>
             </select>
           </div>
           <div class="kg">
             <div class="klbl" style="color:#9b59b6;" id="aiKeyLabel">Anthropic API 키</div>
-            <input class="ki" id="aiKey" type="password" placeholder="sk-ant-..." style="width:300px;" oninput="this.classList.toggle('ok',this.value.length>10)">
+            <input class="ki ok" id="aiKey" type="password" placeholder="sk-ant-..." style="width:300px;" value="AIzaSyDfct21AXTH2kCJ3farGOdb5dCQsQDYY-4" oninput="this.classList.toggle('ok',this.value.length>10)">
             <span id="aiHint" style="font-size:10px;color:#2c4860;">dashboard.anthropic.com → API Keys</span>
           </div>
           <div class="kinfo" style="background:rgba(155,89,182,.06);border:1px solid rgba(155,89,182,.2);font-size:11px;line-height:1.9;">
@@ -300,8 +300,8 @@ tr:last-child td{border-bottom:none;}
         <div class="krow">
           <div class="kg">
             <div class="klbl" style="color:#f39c12;">CoinGlass API 키</div>
-            <input class="ki" id="kCoinGlass" type="password" placeholder="CoinGlass API Key..."
-              oninput="this.classList.toggle('ok',this.value.length>10)" style="width:300px;">
+            <input class="ki ok" id="kCoinGlass" type="password" placeholder="CoinGlass API Key..."
+              value="b745429f379948b8b715f6beded5c2ea" oninput="this.classList.toggle('ok',this.value.length>10)" style="width:300px;">
             <div class="kinfo">coinglass.com/pricing | 티커 자동 수집 + OI/펀딩 데이터</div>
           </div>
           <div class="kinfo" style="background:rgba(243,156,18,.05);border:1px solid rgba(243,156,18,.15);">
@@ -322,8 +322,8 @@ tr:last-child td{border-bottom:none;}
         <div class="krow">
           <div class="kg">
             <div class="klbl" style="color:#e84393;">Arkham API 키</div>
-            <input class="ki" id="kArkham" type="password" placeholder="Arkham API Key ..."
-              oninput="this.classList.toggle('ok',this.value.length>10)" style="width:300px;">
+            <input class="ki ok" id="kArkham" type="password" placeholder="Arkham API Key ..."
+              value="c9ec3a0d-6473-431d-9929-0f09450e78e1" oninput="this.classList.toggle('ok',this.value.length>10)" style="width:300px;">
             <div class="kinfo">Binance·Vitalik·팀지갑 등 실명 라벨 | 20 req/sec</div>
           </div>
           <div class="kinfo" style="background:rgba(232,67,147,.05);border:1px solid rgba(232,67,147,.15);">
@@ -344,7 +344,7 @@ tr:last-child td{border-bottom:none;}
         <div class="krow">
           <div class="kg">
             <div class="klbl" style="color:var(--gold);">Etherscan API 키 (ETH chainid=1 · ARB chainid=42161 · POLY chainid=137)</div>
-            <input class="ki" id="kEth" type="password" placeholder="V2 API Key (Pro Standard — 모든 체인 통합)" oninput="this.classList.toggle('ok',this.value.length>10)">
+            <input class="ki ok" id="kEth" type="password" placeholder="V2 API Key (Pro Standard — 모든 체인 통합)" value="MFC6RKPAYYCWID4YEH9ZM7FJWTZPY9HM4Z" oninput="this.classList.toggle('ok',this.value.length>10)">
             <a class="klink" href="https://etherscan.io/myapikey" target="_blank">etherscan.io → API Keys → Add</a>
           </div>
           <div class="kinfo" style="background:rgba(255,204,68,.05);border:1px solid rgba(255,204,68,.15);">
@@ -6084,7 +6084,7 @@ async function callAI(prompt){
 }
 
 function getAiEngKey(){
-  try{var eng=(document.getElementById('aiEngine')||{}).value||'gemini';return localStorage.getItem('smt_aikey_'+eng)||(document.getElementById('aiApiKey')||{}).value||'';}catch(e){return '';}
+  try{var eng=(document.getElementById('aiEngine')||{}).value||'gemini';return localStorage.getItem('smt_aikey_'+eng)||(document.getElementById('aiKey')||{}).value||'';}catch(e){return '';}
 }
 
 async function runAISignal(key, chain){
