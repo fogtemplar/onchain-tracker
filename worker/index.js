@@ -372,30 +372,52 @@ function connectChain(chain) {
   const ws = new WebSocket(cfg.wss);
   state.ws[chain] = ws;
 
+  // BSC는 array OR 필터 미지원 → 거래소별 개별 구독
+  // 다른 체인은 한 번에 array로 가능
+  const isBsc = chain === 'bsc';
+  const subIds = new Set();
+
   ws.on('open', () => {
     log(`[${chain}] ✓ 연결됨`);
     const exchangeAddrs = EXCHANGES[chain] || [];
-    const addrTopics = exchangeAddrs.map(e => addrToTopic(e.addr));
-    const subParams = {
-      topics: [TRANSFER_TOPIC, addrTopics],
-    };
-    ws.send(JSON.stringify({
-      jsonrpc: '2.0',
-      method: 'eth_subscribe',
-      params: ['logs', subParams],
-      id: 1,
-    }));
+
+    if (isBsc) {
+      // 거래소마다 개별 구독 (BSC 호환)
+      exchangeAddrs.forEach((ex, idx) => {
+        ws.send(JSON.stringify({
+          jsonrpc: '2.0',
+          method: 'eth_subscribe',
+          params: ['logs', {
+            topics: [TRANSFER_TOPIC, addrToTopic(ex.addr)]
+          }],
+          id: 1000 + idx,
+        }));
+      });
+    } else {
+      // 일반: 한 번에 array
+      const addrTopics = exchangeAddrs.map(e => addrToTopic(e.addr));
+      ws.send(JSON.stringify({
+        jsonrpc: '2.0',
+        method: 'eth_subscribe',
+        params: ['logs', { topics: [TRANSFER_TOPIC, addrTopics] }],
+        id: 1,
+      }));
+    }
   });
 
   ws.on('message', async (data) => {
     try {
       const msg = JSON.parse(data.toString());
-      if (msg.id === 1 && msg.result) {
-        log(`[${chain}] ✓ 구독 시작 (${(EXCHANGES[chain] || []).length}개 거래소)`);
+      // 구독 응답
+      if (msg.id != null && msg.result) {
+        subIds.add(msg.result);
+        if (!isBsc || subIds.size === (EXCHANGES[chain] || []).length) {
+          log(`[${chain}] ✓ 구독 시작 (${(EXCHANGES[chain] || []).length}개 거래소, ${subIds.size}개 sub)`);
+        }
         return;
       }
-      if (msg.id === 1 && msg.error) {
-        log(`[${chain}] ❌ 구독 실패:`, msg.error.message);
+      if (msg.id != null && msg.error) {
+        log(`[${chain}] ❌ 구독 실패 (id=${msg.id}):`, msg.error.message);
         return;
       }
       if (msg.method === 'eth_subscription' && msg.params?.result) {
