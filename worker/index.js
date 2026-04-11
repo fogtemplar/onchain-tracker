@@ -475,23 +475,37 @@ async function getPrice(symbol, ca, chain) {
     if (cached && Date.now() - cached.ts < 5 * 60 * 1000) return cached.price;
   }
 
-  // 1. DexScreener — CA 직접 조회 (가장 정확, 같은 CA의 풀에서만 가격 가져옴)
+  // 1. DexScreener — CA 직접 조회 + 중앙값 (이상치 제거)
   if (caLo) {
     try {
       const r = await fetch(`https://api.dexscreener.com/latest/dex/tokens/${caLo}`);
       if (r.ok) {
         const d = await r.json();
-        const valid = (d.pairs || []).filter(p => p.priceUsd && parseFloat(p.priceUsd) > 0);
-        if (valid.length) {
-          // 유동성 가장 큰 풀
+        const valid = (d.pairs || [])
+          .filter(p => p.priceUsd && parseFloat(p.priceUsd) > 0 && (p.liquidity?.usd || 0) >= 5000);
+        if (valid.length >= 1) {
+          // 중앙값 계산 (이상치 제거)
+          const prices = valid.map(p => parseFloat(p.priceUsd)).sort((a, b) => a - b);
+          const mid = Math.floor(prices.length / 2);
+          const median = prices.length % 2 === 0
+            ? (prices[mid - 1] + prices[mid]) / 2
+            : prices[mid];
+
+          // 가장 유동성 큰 풀의 가격 가져오기
           valid.sort((a, b) => (b.liquidity?.usd || 0) - (a.liquidity?.usd || 0));
-          const best = valid[0];
-          const p = parseFloat(best.priceUsd);
-          // sanity check — 유동성 너무 낮으면 가격 신뢰 안 함
-          const liq = best.liquidity?.usd || 0;
-          if (p > 0 && liq >= 5000) {
-            state.priceCache.set(caLo, { price: p, ts: Date.now() });
-            return p;
+          const topPrice = parseFloat(valid[0].priceUsd);
+
+          // top price가 중앙값과 5배 이상 차이나면 이상치 → 중앙값 사용
+          let finalPrice;
+          if (median > 0 && (topPrice / median > 5 || median / topPrice > 5)) {
+            finalPrice = median;
+          } else {
+            finalPrice = topPrice;
+          }
+
+          if (finalPrice > 0) {
+            state.priceCache.set(caLo, { price: finalPrice, ts: Date.now() });
+            return finalPrice;
           }
         }
       }
