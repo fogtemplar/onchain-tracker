@@ -207,31 +207,64 @@ for(const ch of Object.keys(EXCHANGES)) {
 
 // ── LP Position Manager / Pool / Gauge (제외 대상) ──
 const LP_MANAGERS = new Set([
-  // Uniswap
-  '0xc36442b4a4522e871399cd717abdd847ab11fe88', // V3 NFT PM (multi-chain)
+  // ─ Uniswap (모든 체인 동일 주소) ─
+  '0xc36442b4a4522e871399cd717abdd847ab11fe88', // V3 NFT PM (ETH/ARB/POLY/BASE/OP/BSC)
   '0xbd216513d74c8cf14cf4747e6aaa6420ff64ee9e', // V4 PM
-  // PancakeSwap
-  '0x46a15b0b27311cedf172ab29e4f4766fbe7f4364', // V3 PM
+  '0xa51afafe0263b40edaef0df8781ea9aa03e381a3', // V4 PoolManager (ETH)
+  '0x498581ff718922c3f8e6a244956af099b2652b2b', // V4 PoolManager (BASE)
+  // ─ PancakeSwap V3 (BSC/ETH/ARB/BASE 동일) ─
+  '0x46a15b0b27311cedf172ab29e4f4766fbe7f4364', // V3 NonfungiblePositionManager
   '0x556b9306565093c855aea9ae92a594704c2cd59e', // MasterChef V3
-  // SushiSwap
-  '0x2214a42d8e2a1d20635c2cb0664422c528b6a432', // V3 PM
-  // Aerodrome (Base)
-  '0xf2a9280cec5d1bf46232b94580cd62165325567a', // Slipstream NFT PM
-  '0x827922686190790b37229fd06084350e74485b72', // V2 Router (legacy)
-  '0xcf77a3ba9a5ca399b7c97c74d54e5b1beb874e43', // Aerodrome Router
-  // Velodrome (Optimism, Aerodrome fork)
-  '0xa062ae8a9c5e11aaa026fc2670b0d65ccc8b2858', // Slipstream NFT PM
-  // SwapBased / Baseswap (Base)
-  '0x327df1e6de05895d2ab08513aadd9313fe505d86', // BaseSwap V2 Router
-  // Trader Joe
-  '0xb4315e873dbcf96ffd0acd8ea43f689d8c20fb30', // V2.1 LBRouter
-  // QuickSwap (Polygon)
-  '0xa5e0829caced8ffdd4de3c43696c57f7d7a678ff', // V2 Router
-  '0xf5b509bb0909a69b1c207e495f687a596c168e12', // V3 PM
-  // Camelot (Arbitrum)
+  '0x41ff9aa7e16b8b1a8a8dc4f0efacd93d02d071c9', // PancakeSwap MasterChef V2 (BSC)
+  // ─ SushiSwap V3 ─
+  '0x2214a42d8e2a1d20635c2cb0664422c528b6a432', // V3 NFT PM (multi-chain)
+  '0xf0cbce1942a68beb3d1b73f0dd86c8dcc363ef49', // Sushi V3 PM (alt)
+  // ─ Aerodrome (Base) ─
+  '0xf2a9280cec5d1bf46232b94580cd62165325567a', // Slipstream NFT PM (active)
+  '0x827922686190790b37229fd06084350e74485b72', // CL Slipstream NFT PM (alt)
+  '0xeC8E5342B19977B4eF8892e02D8DAEcfa1315831', // Slipstream Pool Factory
+  '0xbe6d8f0d05cc4be24d5167a3ef062215be6d18a5', // Slipstream Swap Router
+  '0xcf77a3ba9a5ca399b7c97c74d54e5b1beb874e43', // Aerodrome Router (V2)
+  // ─ Velodrome (Optimism — Aerodrome fork) ─
+  '0x416b433906b1b72fa758e166e239c43d68dc6f29', // Slipstream NFT PM (Velodrome)
+  '0xa062ae8a9c5e11aaa026fc2670b0d65ccc8b2858', // Slipstream NFT PM (alt)
+  // ─ Camelot (Arbitrum) ─
+  '0x00c7f3082833e796a5b3e4bd59f6642ff44dcd15', // V3 (Algebra) NFT PM
   '0xc873fecbd354f5a56e00e710b90ef4201db2448d', // V2 Router
-  '0x00c7f3082833e796a5b3e4bd59f6642ff44dcd15', // V3 NFT PM
-]);
+  // ─ Thena (BSC — Algebra) ─
+  '0x0927a5abbd02ed73ba83fc93bd9900b1c2e52348', // NonfungiblePositionManager
+  // ─ QuickSwap (Polygon) ─
+  '0xa5e0829caced8ffdd4de3c43696c57f7d7a678ff', // V2 Router
+  '0xf5b509bb0909a69b1c207e495f687a596c168e12', // V3 NFT PM (Algebra)
+  '0x8aac493fd8c78536ef193dbfa3ba2ed7d76dcb46', // V3 PM (alt)
+  // ─ Trader Joe (ARB/BSC/AVAX) ─
+  '0xb4315e873dbcf96ffd0acd8ea43f689d8c20fb30', // V2.1 LBRouter
+  '0xb87215f1ec803d51c0fe3a8da6a5e34cda20bb4f', // V2 PM (alt)
+  // ─ BaseSwap (Base) ─
+  '0x327df1e6de05895d2ab08513aadd9313fe505d86', // V2 Router
+  // ─ SwapBased (Base) ─
+  '0xaaa3b1f1bd7bcc97fd1917c18ade665c5d31f067', // V2 Router
+  // ─ Maverick V2 (multi-chain) ─
+  '0x0000000000a38854e1f0e9c1075ec6c7e2cc6a5d', // PositionManager
+  '0x0000007a005e3e8efc83a8c2eaa628fb6b8b0e3f', // Router
+  // ─ Curve ─
+  '0x99a58482bd75cbab83b27ec03ca68ff489b5788f', // Router
+  '0xfa9a30350048b2bf66865ee20363067c66f67e58', // Curve Router NG
+  // ─ Balancer Vault ─
+  '0xba12222222228d8ba445958a75a0704d566bf2c8', // V2 Vault
+  '0xba1333333333a1ba1108e8412f11850a5c319ba9', // V3 Vault
+  // ─ Ramses (Arbitrum) ─
+  '0xaa277cb7914b7e5514946da92cb9de332ce610ef', // V2 NFT PM
+  '0x1aa07e8377d70b033ba139e007d51edf689b2ed3', // CL NFT PM
+  // ─ KyberSwap Elastic ─
+  '0xe222fbe074a436145b255442d919e4e3a6c6a480', // PositionManager
+  '0x2b1c7b41f6a8f2b2bc45c3233a5d5fb3cd6dc9a8', // Anti-snipe PM
+  // ─ Iziswap ─
+  '0x110dE362cc436D7f54210f96b8C7652C2617887D', // PM
+  // ─ DODO V3 ─
+  '0xa356867fdcea8e71aeaf87805808803806231fdc', // Proxy
+  '0xa2398842f37465f89540430bdc00219fa9e4d28a', // V2 Proxy
+].map(s => s.toLowerCase()));
 const DEX_BLACKLIST = LP_MANAGERS;
 
 // 동적: token CA의 LP pair는 자동 감지 후 추가됨
