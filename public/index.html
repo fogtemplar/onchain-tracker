@@ -1656,11 +1656,17 @@ window.addEventListener('DOMContentLoaded', function(){
         <label style="font-size:11px;color:#000;margin-left:8px;">간격:</label>
         <select id="whaleInterval" style="font-size:11px;">
           <option value="30">30초</option>
-          <option value="60" selected>1분</option>
-          <option value="120">2분</option>
+          <option value="60">1분</option>
+          <option value="120" selected>2분</option>
           <option value="300">5분</option>
         </select>
+        <label style="font-size:11px;color:#000;margin-left:8px;display:flex;align-items:center;gap:4px;">
+          <input type="checkbox" id="whaleBnbOnly" checked>
+          <span>Binance 상장만</span>
+          <span id="whaleBnbCount" style="color:#000080;font-weight:bold;">(0)</span>
+        </label>
         <button id="whaleStartBtn" onclick="whaleToggle()" style="font-weight:bold;color:#008000;">▶ 시작</button>
+        <button onclick="whaleRefreshBnb()">🔄 Binance 갱신</button>
         <button onclick="whaleClear()">🗑 비우기</button>
       </div>
     </div>
@@ -1705,8 +1711,75 @@ var WHALE = {
   seenHashes: new Set(),
   totalScanned: 0,
   priceCache: {},    // ca → {price, ts}
-  lastPoll: null
+  lastPoll: null,
+  bnbWhitelist: null // Set of Binance 상장 심볼
 };
+
+// ── Binance 상장 토큰 화이트리스트 (Spot + Futures) ──
+function whaleLoadBnb(){
+  try {
+    var raw = localStorage.getItem('binance_whitelist_v1');
+    if(!raw) return null;
+    var d = JSON.parse(raw);
+    if(Date.now() - d.ts > 86400000) return null; // 24h TTL
+    return new Set(d.symbols);
+  } catch(e){ return null; }
+}
+function whaleSaveBnb(symbols){
+  try {
+    localStorage.setItem('binance_whitelist_v1', JSON.stringify({
+      ts: Date.now(), symbols: Array.from(symbols)
+    }));
+  } catch(e){}
+}
+async function whaleFetchBnb(){
+  document.getElementById('whaleStatus').textContent = '🔄 Binance 화이트리스트 수집 중...';
+  var bases = new Set();
+  try {
+    // Spot
+    var sr = await fetch('https://api.binance.com/api/v3/exchangeInfo', {signal: AbortSignal.timeout(15000)});
+    var sd = await sr.json();
+    (sd.symbols||[]).filter(function(s){
+      return s.status==='TRADING' && (s.quoteAsset==='USDT'||s.quoteAsset==='USDC'||s.quoteAsset==='BTC'||s.quoteAsset==='FDUSD');
+    }).forEach(function(s){ bases.add(s.baseAsset.toUpperCase()); });
+  } catch(e){ console.warn('Binance Spot fetch failed:', e.message); }
+
+  try {
+    // Futures USDT-M perpetual
+    var fr = await fetch('https://fapi.binance.com/fapi/v1/exchangeInfo', {signal: AbortSignal.timeout(15000)});
+    var fd = await fr.json();
+    (fd.symbols||[]).filter(function(s){
+      return s.status==='TRADING' && s.contractType==='PERPETUAL';
+    }).forEach(function(s){ bases.add(s.baseAsset.toUpperCase()); });
+  } catch(e){ console.warn('Binance Futures fetch failed:', e.message); }
+
+  whaleSaveBnb(bases);
+  WHALE.bnbWhitelist = bases;
+  document.getElementById('whaleBnbCount').textContent = '('+bases.size+')';
+  document.getElementById('whaleStatus').textContent = '✓ Binance 화이트리스트 '+bases.size+'개 로드';
+  return bases;
+}
+async function whaleRefreshBnb(){
+  await whaleFetchBnb();
+}
+async function whaleEnsureBnb(){
+  if(WHALE.bnbWhitelist && WHALE.bnbWhitelist.size) return WHALE.bnbWhitelist;
+  WHALE.bnbWhitelist = whaleLoadBnb();
+  if(WHALE.bnbWhitelist){
+    document.getElementById('whaleBnbCount').textContent = '('+WHALE.bnbWhitelist.size+')';
+    return WHALE.bnbWhitelist;
+  }
+  return await whaleFetchBnb();
+}
+// 페이지 로드 시 캐시에서 즉시 로드
+setTimeout(function(){
+  var cached = whaleLoadBnb();
+  if(cached){
+    WHALE.bnbWhitelist = cached;
+    var el = document.getElementById('whaleBnbCount');
+    if(el) el.textContent = '('+cached.size+')';
+  }
+}, 300);
 
 function whaleToggle(){
   if(WHALE.active) whaleStop();
@@ -1754,12 +1827,14 @@ async function whalePoll(){
 
   var chains = Array.from(document.querySelectorAll('.whaleChain:checked')).map(function(c){return c.value;});
   var minUsd = parseInt(document.getElementById('whaleMinUsd').value)||100000;
+  var bnbOnly = document.getElementById('whaleBnbOnly').checked;
   if(!chains.length){
     document.getElementById('whaleStatus').textContent = '⚠ 체인을 선택하세요';
     return;
   }
 
   var EXCL = window.getExcludeSet ? window.getExcludeSet() : new Set();
+  var BNB = bnbOnly ? await whaleEnsureBnb() : null;
   var scanned = 0;
   var newCount = 0;
 
@@ -1802,6 +1877,8 @@ async function whalePoll(){
         if(!sym) continue;
         // EXCLUDE 거름
         if(EXCL.has(sym)) continue;
+        // Binance 화이트리스트 (활성 시)
+        if(BNB && !BNB.has(sym)) continue;
 
         var dec = parseInt(tx.tokenDecimal||'18')||18;
         var amt = 0;
