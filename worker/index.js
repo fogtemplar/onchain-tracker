@@ -199,65 +199,20 @@ for(const ch of Object.keys(EXCHANGES)) {
   }
 }
 
-// ── DEX / Bridge / Aggregator 블랙리스트 (LP/swap 노이즈 제외) ──
+// ── LP/Position Manager 블랙리스트 (LP add/remove만 제외, swap/bridge는 허용) ──
+// 사용자 요청: CEX↔CEX, Bridge, DEX swap, Aggregator는 잡고 LP add/remove만 거름
 const DEX_BLACKLIST = new Set([
-  // ─ Uniswap (ETH/Multi) ─
-  '0x7a250d5630b4cf539739df2c5dacb4c659f2488d', // V2 Router
-  '0xe592427a0aece92de3edee1f18e0157c05861564', // V3 Router
-  '0x68b3465833fb72a70ecdf485e0e4c7bd8665fc45', // SwapRouter02
-  '0xef1c6e67703c7bd7107eed8303fbe6ec2554bf6b', // Universal Router
-  '0x66a9893cc07d91d95644aedd05d03f95e1dba8af', // V4 Universal Router
-  '0x5c69bee701ef814a2b6a3edd4b1652cb9cc5aa6f', // V2 Factory
-  '0x1f98431c8ad98523631ae4a59f267346ea31f984', // V3 Factory
-  // ─ PancakeSwap (BSC) ─
-  '0x10ed43c718714eb63d5aa57b78b54704e256024e', // V2 Router
-  '0x13f4ea83d0bd40e75c8222255bc855a974568dd4', // V3 SwapRouter
-  '0x1a0a18ac4becddbd6389559687d1a73d8927e416', // Smart Router
-  '0xca143ce32fe78f1f7019d7d551a6402fc5350c73', // V2 Factory
-  '0x0bfbcf9fa4f9c56b0f40a671ad40e0805a091865', // V3 Factory
-  '0x46a15b0b27311cedf172ab29e4f4766fbe7f4364', // V3 PositionManager
-  // ─ SushiSwap ─
-  '0xd9e1ce17f2641f24ae83637ab66a2cca9c378b9f', // ETH Router
-  '0x1b02da8cb0d097eb8d57a175b88c7d8b47997506', // BSC Router
-  '0x827179dd56d07a7eea93e9c1af0d4a0d9fb86391', // Sushi Smart Router
-  // ─ 1inch ─
-  '0x1111111254fb6c44bac0bed2854e76f90643097d', // V4
-  '0x1111111254eeb25477b68fb85ed929f73a960582', // V5
-  '0x111111125421ca6dc452d289314280a0f8842a65', // V6
-  '0x111111125421ca6dc452d289314280a0f8842a65',
-  // ─ 0x Protocol ─
-  '0xdef1c0ded9bec7f1a1670819833240f027b25eff', // Exchange Proxy
-  '0xdef1abe32c034e558cdd535791643c58a13acc10', // 0x V2
-  // ─ Paraswap ─
-  '0x216b4b4ba9f3e719726886d34a177484278bfcae',
-  '0xdef171fe48cf0115b1d80b88dc8eab59176fee57',
-  '0x6a000f20005980200259b80c5102003040001068',
-  // ─ Kyber/KyberSwap ─
-  '0x6131b5fae19ea4f9d964eac0408e4408b66337b5',
-  '0xc1e7dfe73e1598e3910ef4c7845b68a9ab6f4c83',
-  // ─ Curve ─
-  '0x99a58482bd75cbab83b27ec03ca68ff489b5788f', // Router
-  '0xfa9a30350048b2bf66865ee20363067c66f67e58', // Curve Router NG
-  // ─ Balancer ─
-  '0xba12222222228d8ba445958a75a0704d566bf2c8', // Vault
-  // ─ DODO ─
-  '0xa356867fdcea8e71aeaf87805808803806231fdc',
-  '0xa2398842f37465f89540430bdc00219fa9e4d28a',
-  // ─ ODOS ─
-  '0xcf5540fffcdc3d510b18bfca6d2b9987b0772559',
-  '0xa669e7a0d4b3e4fa48af2de86bd4cd7126be4e13',
-  // ─ Bridges ─
-  '0x4200000000000000000000000000000000000010', // Optimism Bridge
-  '0x99c9fc46f92e8a1c0dec1b1747d010903e884be1', // Optimism L1
-  '0xa3a7b6f88361f48403514059f1f16c8e78d60eec', // Arbitrum Bridge L1
-  '0xcee284f754e854890e311e3280b767f80797180d', // Across Spoke
-  '0x2c2eaff0c1d2c0aa1a0e3d0c4ad5b09c2d6f6e1f', // Stargate
-  '0x8731d54e9d02c286767d56ac03e8037c07e01e98', // Stargate Router
-  '0x150f94b44927f078737562f0fcf3c95c01cc2376', // Stargate ETH
-  '0xc36442b4a4522e871399cd717abdd847ab11fe88', // V3 NFT Position Manager
-  // ─ MEV builders / common bot routers ─
-  '0x6b75d8af000000e20b7a7ddf000ba900b4009a80', // Banana Gun
-  '0x00000000000d8a4b1a9c2bcde60a4f0c0c7c9bd1', // MEV bot common
+  // Uniswap V3 NFT Position Manager (LP NFT mint/burn 시 token transfer 발생)
+  '0xc36442b4a4522e871399cd717abdd847ab11fe88', // V3 NFT Position Manager (multi-chain)
+  '0xc36442b4a4522e871399cd717abdd847ab11fe88',
+  // Uniswap V4 Position Manager
+  '0xbd216513d74c8cf14cf4747e6aaa6420ff64ee9e',
+  // PancakeSwap V3 NonfungiblePositionManager
+  '0x46a15b0b27311cedf172ab29e4f4766fbe7f4364',
+  // PancakeSwap MasterChef V3 (LP staking)
+  '0x556b9306565093c855aea9ae92a594704c2cd59e',
+  // SushiSwap V3 NFT Position Manager
+  '0x2214a42d8e2a1d20635c2cb0664422c528b6a432',
 ]);
 
 // ── State ──
@@ -389,31 +344,39 @@ async function buildCAList() {
     log('CA build skipped — Binance WL empty');
     return state.caList;
   }
-  log('CA list 빌드 시작 (CoinGecko top 1000 페치)...');
+  log(`CA list 빌드 시작 (BNB: ${BNB.size}심볼, CoinGecko 페치 중...)`);
 
   // CoinGecko coins/list?include_platform=true (1회, ~1MB)
   let coinsList = [];
   try {
-    const r = await fetch('https://api.coingecko.com/api/v3/coins/list?include_platform=true');
+    const r = await fetch('https://api.coingecko.com/api/v3/coins/list?include_platform=true', {
+      signal: AbortSignal.timeout(30000)
+    });
+    log(`coins/list HTTP ${r.status}`);
     if (r.ok) coinsList = await r.json();
   } catch (e) { log('coins/list err:', e.message); }
-  if (!Array.isArray(coinsList)) {
-    log('coins/list 실패');
+  if (!Array.isArray(coinsList) || coinsList.length === 0) {
+    log(`coins/list 실패 (got ${typeof coinsList}, ${coinsList?.length || 0})`);
     return state.caList;
   }
+  log(`coins/list 받음: ${coinsList.length}개`);
 
   // markets top 1000 (시총 순)
   let topCoins = [];
   try {
     for (let page = 1; page <= 4; page++) {
-      const r = await fetch(`https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=250&page=${page}`);
+      const r = await fetch(`https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=250&page=${page}`, {
+        signal: AbortSignal.timeout(15000)
+      });
+      log(`markets page ${page} HTTP ${r.status}`);
       if (r.ok) {
         const d = await r.json();
         if (Array.isArray(d)) topCoins = topCoins.concat(d);
       }
-      await new Promise(rs => setTimeout(rs, 300));
+      await new Promise(rs => setTimeout(rs, 500));
     }
   } catch (e) { log('markets err:', e.message); }
+  log(`markets 받음: ${topCoins.length}개 코인`);
 
   // id → platforms 인덱스
   const idToPlatforms = {};
