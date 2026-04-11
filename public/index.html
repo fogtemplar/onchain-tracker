@@ -362,11 +362,13 @@ body.dash #signalRankList .sig-row:hover{background:rgba(0,180,216,.03);}
 .sub-tab:hover{color:var(--white);background:rgba(255,255,255,.02);}
 .sub-tab.on{color:var(--cyan);border-bottom-color:var(--cyan);background:rgba(0,180,216,.04);}
 
-/* 토큰 분석 모드일 때 메인 콘텐츠 위쪽 여백 */
-body.dash #analyzeBar[style*="flex"]~.pane,
-body.dash #analyzeBar[style*="flex"]~div .pane{margin-top:90px;}
+/* 토큰 분석 모드일 때만 analyzeBar(76px) 만큼 padding-top 추가 */
+body.dash[data-mode="analyze"]{padding-top:106px !important;}
 body.dash #pane-h, body.dash #pane-o, body.dash #pane-d, body.dash #pane-w{padding-top:0;}
-body.dash[data-mode="analyze"]{padding-top:136px;}
+
+/* 다른 모드는 dash-top(30px)만 */
+body.dash:not([data-mode="analyze"]){padding-top:30px !important;}
+body.dash:not([data-mode="analyze"]) .pane{margin-top:0 !important;}
 
 /* 모바일/좁은 화면: 기본 모드로 폴백 */
 @media (max-width: 1100px){
