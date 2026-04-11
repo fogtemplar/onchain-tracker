@@ -620,8 +620,6 @@ a:visited{color:#800080 !important;}
   <span class="sub">Smart Money · CoinGlass · Etherscan Pro · Arkham</span>
   <div class="spacer"></div>
   <button class="dt-keys" onclick="document.querySelector('.keys details').open=!document.querySelector('.keys details').open">⚙ API 키</button>
-  <button class="dt-btn" id="dtRunBtn" onclick="runMasterAnalysis()">🚀 전체 분석</button>
-  <button class="dt-btn stop" id="dtStopBtn" onclick="stopMasterAnalysis()" style="display:none;">■ 중지</button>
   <div style="display:flex;align-items:center;gap:6px;">
     <span id="dashLiveLbl" style="font-size:11px;color:var(--text2);">대기</span>
     <div class="dot" id="dashLiveDot"></div>
@@ -1633,14 +1631,69 @@ window.addEventListener('DOMContentLoaded', function(){
 
 <!-- ═══ WHALE 100K+ TRANSFER PANE ═══ -->
 <div class="pane" id="pane-whale">
-  <!-- 서브탭 바 -->
-  <div style="background:#000080;padding:6px 16px;display:flex;gap:0;border-bottom:1px solid #000;">
-    <button class="whale-sub on" id="wsubTab-live" onclick="whaleSubTab('live')">📺 실시간</button>
-    <button class="whale-sub" id="wsubTab-analytics" onclick="whaleSubTab('analytics')">📊 분석<span id="wsubAnomBadge" style="margin-left:6px;background:#fff;color:#000080;padding:1px 6px;font-size:10px;font-weight:bold;border:1px solid #fff;">0</span></button>
+  <span id="wsubAnomBadge" style="display:none;">0</span>
+
+  <!-- ═ 분석 (위) ═ -->
+  <div style="padding:14px 20px;background:#c0c0c0;border-bottom:1px solid #808080;">
+    <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+      <div style="font-size:14px;font-weight:bold;color:#000;">📊 분석 (Railway DB 기반)</div>
+      <span id="analyticsStatus" style="font-size:11px;color:#404040;">대기 중</span>
+      <div style="margin-left:auto;display:flex;gap:6px;align-items:center;">
+        <label style="font-size:11px;color:#000;display:flex;align-items:center;gap:4px;">
+          <input type="checkbox" id="analyticsAuto" checked> 30초 자동갱신
+        </label>
+        <button onclick="analyticsRefresh()">🔄 새로고침</button>
+      </div>
+    </div>
   </div>
 
-  <!-- ═ 실시간 서브탭 ═ -->
-  <div id="wsub-live">
+  <!-- 이상 신호 섹션 -->
+  <div style="padding:14px 20px;background:#c0c0c0;border-bottom:2px solid #404040;">
+    <div style="font-size:12px;font-weight:bold;color:#800000;margin-bottom:10px;">🚨 이상 신호 감지</div>
+    <div id="anomalyList" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:10px;">
+      <div style="padding:20px;text-align:center;color:#404040;font-size:11px;grid-column:1/-1;">데이터 로딩 중...</div>
+    </div>
+  </div>
+
+  <!-- 토큰 빈도 섹션 -->
+  <div style="padding:14px 20px;background:#c0c0c0;border-bottom:2px solid #404040;">
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;">
+      <div style="font-size:12px;font-weight:bold;color:#000080;">📊 토큰별 100K+ 전송 빈도</div>
+      <div style="display:flex;gap:0;margin-left:auto;">
+        <button class="freq-tab" id="freqTab1" onclick="analyticsLoadFreq(1)">1일</button>
+        <button class="freq-tab on" id="freqTab7" onclick="analyticsLoadFreq(7)">7일</button>
+        <button class="freq-tab" id="freqTab30" onclick="analyticsLoadFreq(30)">30일</button>
+      </div>
+      <select id="freqSort" onchange="analyticsRenderFreq()" style="font-size:11px;">
+        <option value="cnt">횟수순</option>
+        <option value="total_usd">USD순</option>
+        <option value="avg_usd">평균순</option>
+        <option value="last_ts">최근순</option>
+      </select>
+    </div>
+    <div style="overflow-x:auto;">
+      <table id="freqTbl" style="width:100%;border-collapse:collapse;font-size:11px;">
+        <thead>
+          <tr>
+            <th style="text-align:center;">#</th>
+            <th>토큰</th>
+            <th>체인</th>
+            <th style="text-align:right;">횟수</th>
+            <th style="text-align:right;">총 USD</th>
+            <th style="text-align:right;">평균</th>
+            <th style="text-align:right;">최대</th>
+            <th>분포</th>
+            <th>최근</th>
+          </tr>
+        </thead>
+        <tbody id="freqBody">
+          <tr><td colspan="9" style="padding:30px;text-align:center;color:#404040;">로딩 중...</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- ═ 실시간 (아래) ═ -->
   <div style="padding:14px 20px;background:#c0c0c0;border-bottom:1px solid #808080;">
     <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:10px;">
       <div style="font-size:14px;font-weight:bold;color:#000;">🐋 100K+ 전송 상시 트래킹</div>
@@ -1710,70 +1763,6 @@ window.addEventListener('DOMContentLoaded', function(){
       </tbody>
     </table>
   </div>
-  </div>
-  <!-- ═ /실시간 서브탭 ═ -->
-
-  <!-- ═ 분석 서브탭 ═ -->
-  <div id="wsub-analytics" style="display:none;">
-  <div style="padding:14px 20px;background:#c0c0c0;border-bottom:1px solid #808080;">
-    <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
-      <div style="font-size:14px;font-weight:bold;color:#000;">📊 분석 (Railway DB 기반)</div>
-      <span id="analyticsStatus" style="font-size:11px;color:#404040;">대기 중</span>
-      <div style="margin-left:auto;display:flex;gap:6px;align-items:center;">
-        <label style="font-size:11px;color:#000;display:flex;align-items:center;gap:4px;">
-          <input type="checkbox" id="analyticsAuto" checked> 30초 자동갱신
-        </label>
-        <button onclick="analyticsRefresh()">🔄 새로고침</button>
-      </div>
-    </div>
-  </div>
-
-  <!-- 이상 신호 섹션 -->
-  <div style="padding:14px 20px;background:#c0c0c0;border-bottom:2px solid #404040;">
-    <div style="font-size:12px;font-weight:bold;color:#800000;margin-bottom:10px;">🚨 이상 신호 감지</div>
-    <div id="anomalyList" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:10px;">
-      <div style="padding:20px;text-align:center;color:#404040;font-size:11px;grid-column:1/-1;">데이터 로딩 중...</div>
-    </div>
-  </div>
-
-  <!-- 토큰 빈도 섹션 -->
-  <div style="padding:14px 20px;background:#c0c0c0;">
-    <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;">
-      <div style="font-size:12px;font-weight:bold;color:#000080;">📊 토큰별 100K+ 전송 빈도</div>
-      <div style="display:flex;gap:0;margin-left:auto;">
-        <button class="freq-tab" id="freqTab1" onclick="analyticsLoadFreq(1)">1일</button>
-        <button class="freq-tab on" id="freqTab7" onclick="analyticsLoadFreq(7)">7일</button>
-        <button class="freq-tab" id="freqTab30" onclick="analyticsLoadFreq(30)">30일</button>
-      </div>
-      <select id="freqSort" onchange="analyticsRenderFreq()" style="font-size:11px;">
-        <option value="cnt">횟수순</option>
-        <option value="total_usd">USD순</option>
-        <option value="avg_usd">평균순</option>
-        <option value="last_ts">최근순</option>
-      </select>
-    </div>
-    <div style="overflow-x:auto;">
-      <table id="freqTbl" style="width:100%;border-collapse:collapse;font-size:11px;">
-        <thead>
-          <tr>
-            <th style="text-align:center;">#</th>
-            <th>토큰</th>
-            <th>체인</th>
-            <th style="text-align:right;">횟수</th>
-            <th style="text-align:right;">총 USD</th>
-            <th style="text-align:right;">평균</th>
-            <th style="text-align:right;">최대</th>
-            <th>분포</th>
-            <th>최근</th>
-          </tr>
-        </thead>
-        <tbody id="freqBody">
-          <tr><td colspan="9" style="padding:30px;text-align:center;color:#404040;">로딩 중...</td></tr>
-        </tbody>
-      </table>
-    </div>
-  </div>
-  <!-- ═ /분석 서브탭 ═ -->
 </div>
 
 <style>
