@@ -1665,8 +1665,18 @@ window.addEventListener('DOMContentLoaded', function(){
           <span>Binance 상장만</span>
           <span id="whaleBnbCount" style="color:#000080;font-weight:bold;">(0)</span>
         </label>
+        <label style="font-size:11px;color:#000;margin-left:8px;display:flex;align-items:center;gap:4px;">
+          <input type="radio" name="whaleMode" value="cex" checked onchange="WHALE.scanMode='cex'">
+          <span>거래소 출금만</span>
+        </label>
+        <label style="font-size:11px;color:#000;display:flex;align-items:center;gap:4px;">
+          <input type="radio" name="whaleMode" value="all" onchange="WHALE.scanMode='all'">
+          <span>전체 전송 (EOA↔EOA 포함)</span>
+          <span id="whaleCAcount" style="color:#800000;font-weight:bold;">(0개 토큰)</span>
+        </label>
         <button id="whaleStartBtn" onclick="whaleToggle()" style="font-weight:bold;color:#008000;">▶ 시작</button>
         <button onclick="whaleRefreshBnb()">🔄 Binance 갱신</button>
+        <button onclick="whaleBuildCAList()">📥 CA 매핑 빌드</button>
         <button onclick="whaleClear()">🗑 비우기</button>
       </div>
     </div>
@@ -1687,8 +1697,8 @@ window.addEventListener('DOMContentLoaded', function(){
           <th style="text-align:right;">수량</th>
           <th style="text-align:right;">공급%</th>
           <th style="text-align:right;">USD</th>
-          <th>거래소</th>
-          <th>수신 지갑</th>
+          <th>From</th>
+          <th>To</th>
           <th>위험</th>
           <th>TX</th>
         </tr>
@@ -1708,6 +1718,7 @@ window.addEventListener('DOMContentLoaded', function(){
 var WHALE = {
   active: false,
   mode: 'ws',        // 'ws' (WebSocket 실시간) | 'poll' (REST 폴링)
+  scanMode: 'cex',   // 'cex' (거래소 출금만) | 'all' (모든 토큰 transfer)
   timer: null,
   rows: [],          // 누적 트랜잭션 (최대 500)
   seenHashes: new Set(),
@@ -1716,10 +1727,90 @@ var WHALE = {
   metaCache: {},     // ca → {symbol, decimals, totalSupply}
   lastPoll: null,
   bnbWhitelist: null,// Set of Binance 상장 심볼
+  caList: {},        // chain → [ca1, ca2, ...] (Binance 상장 토큰 CA)
   ws: {},            // chain → WebSocket
   wsSubId: {},       // chain → subscription id
   reconnectTimers: {}
 };
+
+// CA 리스트 빌드 (CoinGecko + Binance 화이트리스트 교집합)
+async function whaleBuildCAList(){
+  document.getElementById('whaleStatus').textContent = '🔄 CoinGecko → Binance 토큰 CA 매핑 중...';
+  var BNB = await whaleEnsureBnb();
+  if(!BNB || !BNB.size){alert('Binance 화이트리스트 먼저 갱신하세요'); return;}
+
+  var caMap = {eth:[], bsc:[], arb:[], base:[], poly:[]};
+  var platformKey = {eth:'ethereum', bsc:'binance-smart-chain', arb:'arbitrum-one', base:'base', poly:'polygon-pos'};
+
+  try {
+    // CoinGecko 시총 top 1000 (4페이지)
+    var allCoins = [];
+    for(var page=1; page<=4; page++){
+      document.getElementById('whaleStatus').textContent = '🔄 CoinGecko top '+(page*250)+'개 페치 중...';
+      var url = 'https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=250&page='+page;
+      // 프록시 경유 (CoinGecko CORS)
+      var proxyUrl = '/api/proxy?service=coingecko&path='+encodeURIComponent('/api/v3/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=250&page='+page);
+      var r = await fetch(proxyUrl, {signal: AbortSignal.timeout(20000)});
+      var d = await r.json();
+      if(Array.isArray(d)) allCoins = allCoins.concat(d);
+      await sleep(300);
+    }
+    document.getElementById('whaleStatus').textContent = '🔄 '+allCoins.length+'개 코인의 platform 데이터 수집 중...';
+
+    // 시총 순으로 BNB 화이트리스트와 매칭
+    // markets API에는 platform 정보가 없어서 coins/list에서 가져와야 함
+    var listUrl = '/api/proxy?service=coingecko&path='+encodeURIComponent('/api/v3/coins/list?include_platform=true');
+    var lr = await fetch(listUrl, {signal: AbortSignal.timeout(30000)});
+    var listD = await lr.json();
+    if(!Array.isArray(listD)){alert('CoinGecko 코인 리스트 실패'); return;}
+
+    // id → platforms 인덱스
+    var idToPlatforms = {};
+    listD.forEach(function(c){ idToPlatforms[c.id] = c.platforms||{}; });
+
+    // top 1000 중 BNB 화이트리스트에 있는 것만 → CA 추출
+    var matched = 0;
+    allCoins.forEach(function(c){
+      var sym = (c.symbol||'').toUpperCase();
+      if(!BNB.has(sym)) return;
+      var platforms = idToPlatforms[c.id];
+      if(!platforms) return;
+      Object.keys(platformKey).forEach(function(ch){
+        var ca = platforms[platformKey[ch]];
+        if(ca && ca.startsWith('0x') && ca.length === 42){
+          if(caMap[ch].indexOf(ca.toLowerCase()) < 0){
+            caMap[ch].push(ca.toLowerCase());
+            matched++;
+          }
+        }
+      });
+    });
+
+    WHALE.caList = caMap;
+    try { localStorage.setItem('whale_calist_v1', JSON.stringify({ts:Date.now(), data:caMap})); } catch(e){}
+    var total = Object.values(caMap).reduce(function(s,a){return s+a.length;},0);
+    document.getElementById('whaleCAcount').textContent = '('+total+'개)';
+    document.getElementById('whaleStatus').textContent = '✓ CA 매핑 완료 — '+total+'개 토큰-체인 페어';
+  } catch(e){
+    document.getElementById('whaleStatus').textContent = '❌ 매핑 실패: '+e.message;
+  }
+}
+
+// 페이지 로드 시 캐시 복원
+setTimeout(function(){
+  try {
+    var raw = localStorage.getItem('whale_calist_v1');
+    if(raw){
+      var d = JSON.parse(raw);
+      if(Date.now()-d.ts < 86400000*7){ // 7일 TTL
+        WHALE.caList = d.data;
+        var total = Object.values(d.data).reduce(function(s,a){return s+a.length;},0);
+        var el = document.getElementById('whaleCAcount');
+        if(el) el.textContent = '('+total+'개)';
+      }
+    }
+  } catch(e){}
+}, 400);
 
 // Alchemy WebSocket 엔드포인트
 var ALCHEMY_KEY = 'TDTn41PcLHD3pGfG1ilgz'; // 사용자 키
@@ -1805,18 +1896,34 @@ function whaleWsConnect(chain, exchangeAddrs){
   var wsUrl = ALCHEMY_WSS[chain];
   var ws = new WebSocket(wsUrl);
   WHALE.ws[chain] = ws;
+  var mode = WHALE.scanMode;
 
   ws.onopen = function(){
     document.getElementById('whaleStatus').textContent = '🟢 ['+chain.toUpperCase()+'] WebSocket 연결됨';
-    // 거래소 지갑 from = transfer Event topic1
-    // 한 번에 여러 주소 OR 구독 (배열로)
-    var addrTopics = exchangeAddrs.map(function(e){return addrToTopic(e.addr);});
 
-    // alchemy_minedTransactions 대신 표준 eth_subscribe logs 사용
-    // 거래소 지갑이 from(topic1)이고, transfer 토픽인 모든 transfer
-    var subParams = {
-      topics: [TRANSFER_TOPIC0, addrTopics] // topic0=Transfer, topic1=from(거래소)
-    };
+    var subParams;
+    if(mode === 'all'){
+      // 전체 모드: Binance 상장 토큰 CA들 모두 구독
+      var caList = WHALE.caList[chain] || [];
+      if(!caList.length){
+        document.getElementById('whaleStatus').textContent = '⚠ ['+chain.toUpperCase()+'] CA 매핑 비어있음 — 📥 CA 매핑 빌드 먼저 실행';
+        ws.close();
+        return;
+      }
+      // address 필터: 토큰 CA 리스트, topic0: Transfer
+      // Alchemy: address 배열 최대 ~1000개
+      subParams = {
+        address: caList,
+        topics: [TRANSFER_TOPIC0]
+      };
+    } else {
+      // 거래소 출금 모드 (기존)
+      var addrTopics = exchangeAddrs.map(function(e){return addrToTopic(e.addr);});
+      subParams = {
+        topics: [TRANSFER_TOPIC0, addrTopics]
+      };
+    }
+
     ws.send(JSON.stringify({
       jsonrpc:'2.0',
       method:'eth_subscribe',
@@ -1828,13 +1935,16 @@ function whaleWsConnect(chain, exchangeAddrs){
   ws.onmessage = async function(ev){
     try {
       var msg = JSON.parse(ev.data);
-      // 구독 응답 (id:1) — sub id 저장
       if(msg.id === 1 && msg.result){
         WHALE.wsSubId[chain] = msg.result;
-        document.getElementById('whaleStatus').textContent = '🟢 ['+chain.toUpperCase()+'] '+exchangeAddrs.length+'개 거래소 구독 시작';
+        var modeLabel = mode==='all' ? (WHALE.caList[chain]||[]).length+'개 토큰' : exchangeAddrs.length+'개 거래소';
+        document.getElementById('whaleStatus').textContent = '🟢 ['+chain.toUpperCase()+'] '+modeLabel+' 구독 시작';
         return;
       }
-      // 실제 로그 이벤트
+      if(msg.id === 1 && msg.error){
+        document.getElementById('whaleStatus').textContent = '❌ ['+chain.toUpperCase()+'] '+msg.error.message;
+        return;
+      }
       if(msg.method === 'eth_subscription' && msg.params && msg.params.result){
         await whaleHandleLog(chain, msg.params.result, exchangeAddrs);
       }
@@ -1872,7 +1982,6 @@ function whaleWsDisconnect(){
 // 새 transfer 로그 처리
 async function whaleHandleLog(chain, log, exchangeAddrs){
   if(!WHALE.active) return;
-  // log: {address, topics:[topic0,topic1=from,topic2=to], data, transactionHash, blockNumber}
   var ca = (log.address||'').toLowerCase();
   var fromTopic = log.topics[1] || '';
   var toTopic = log.topics[2] || '';
@@ -1883,12 +1992,26 @@ async function whaleHandleLog(chain, log, exchangeAddrs){
   if(WHALE.seenHashes.has(hash+'-'+log.logIndex)) return;
   WHALE.seenHashes.add(hash+'-'+log.logIndex);
 
-  // 거래소 → 거래소 제외
-  if(EX_MAP[to.toLowerCase()]) return;
+  // mint/burn 제외
+  if(from === '0x0000000000000000000000000000000000000000') return;
+  if(to   === '0x0000000000000000000000000000000000000000') return;
+  if(to   === '0x000000000000000000000000000000000000dead') return;
 
-  // 거래소 지갑 매칭
-  var exMatch = exchangeAddrs.find(function(e){return e.addr === from.toLowerCase();});
-  if(!exMatch) return;
+  // 거래소 매칭
+  var fromEx = EX_MAP[from.toLowerCase()];
+  var toEx   = EX_MAP[to.toLowerCase()];
+  var exMatch;
+
+  if(WHALE.scanMode === 'all'){
+    // 전체 모드: from/to 어느 쪽이든 거래소면 라벨, 둘 다 거래소면 제외 (CEX 내부)
+    if(fromEx && toEx) return;
+    exMatch = fromEx ? {name:fromEx, addr:from.toLowerCase()} : (toEx ? {name:toEx, addr:to.toLowerCase()} : null);
+  } else {
+    // 거래소 출금 모드: from이 거래소만
+    if(toEx) return;
+    exMatch = exchangeAddrs.find(function(e){return e.addr === from.toLowerCase();});
+    if(!exMatch) return;
+  }
 
   // 토큰 메타데이터 조회
   var meta = await getTokenMeta(chain, ca);
@@ -1936,7 +2059,7 @@ async function whaleHandleLog(chain, log, exchangeAddrs){
     amt: amt,
     usd: usd,
     supplyPct: supplyPct,
-    ex: exMatch.name,
+    ex: exMatch ? exMatch.name : (WHALE.scanMode==='all' ? '직접전송' : '?'),
     from: from.toLowerCase(),
     to: to.toLowerCase(),
     hash: hash,
@@ -2209,7 +2332,9 @@ function whaleRender(){
     var riskLabel = r.risk==='crit'?'🔴 극심':r.risk==='high'?'🟠 높음':'🟡 주의';
     var pctStr = r.supplyPct > 0 ? r.supplyPct.toFixed(2)+'%' : '—';
     var pctColor = r.supplyPct >= 1 ? '#800000' : r.supplyPct >= 0.1 ? '#808000' : '#000080';
-    var toLabel = EX_MAP[r.to] ? '🏦 '+EX_MAP[r.to] : '👤 '+r.to.slice(0,8)+'...'+r.to.slice(-6);
+    var fromLabel = EX_MAP[r.from] ? '🏦 '+EX_MAP[r.from] : '👤 '+r.from.slice(0,6)+'…'+r.from.slice(-4);
+    var toLabel = EX_MAP[r.to] ? '🏦 '+EX_MAP[r.to] : '👤 '+r.to.slice(0,6)+'…'+r.to.slice(-4);
+    var exIcon = r.ex==='직접전송' ? '🔄' : '🏦';
     return '<tr>'+
       '<td style="white-space:nowrap;">'+ago+'</td>'+
       '<td><span style="color:'+(chainColor[r.chain]||'#000')+';font-weight:bold;">'+r.chain.toUpperCase()+'</span></td>'+
@@ -2217,8 +2342,8 @@ function whaleRender(){
       '<td style="text-align:right;">'+fN(r.amt)+'</td>'+
       '<td style="text-align:right;color:'+pctColor+';font-weight:bold;">'+pctStr+'</td>'+
       '<td style="text-align:right;font-weight:bold;color:'+riskColor+';">$'+fN(r.usd)+'</td>'+
-      '<td>🏦 '+r.ex+'</td>'+
-      '<td><a href="'+exp+'/address/'+r.to+'" target="_blank" style="font-family:monospace;color:#0000ff;">'+toLabel+'</a></td>'+
+      '<td><a href="'+exp+'/address/'+r.from+'" target="_blank" style="font-family:monospace;color:#0000ff;font-size:10px;">'+fromLabel+'</a></td>'+
+      '<td><a href="'+exp+'/address/'+r.to+'" target="_blank" style="font-family:monospace;color:#0000ff;font-size:10px;">'+toLabel+'</a></td>'+
       '<td><span style="color:'+riskColor+';font-weight:bold;">'+riskLabel+'</span></td>'+
       '<td><a href="'+exp+'/tx/'+r.hash+'" target="_blank" style="color:#0000ff;">TX↗</a></td>'+
     '</tr>';
