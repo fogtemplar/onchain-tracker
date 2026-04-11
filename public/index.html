@@ -1815,14 +1815,17 @@ setTimeout(async function(){
 
   // 자동 시작 시퀀스
   try {
-    // 1. Binance 화이트리스트 보장
+    // Railway 모드면 즉시 연결 (CA 매핑/Binance 빌드 불필요 — 워커가 다 함)
+    if(RAILWAY_WS_URL){
+      if(!WHALE.active) whaleStart();
+      return;
+    }
+    // 폴백: Alchemy 직접 모드 (Railway URL 없을 때만)
     await whaleEnsureBnb();
-    // 2. CA 매핑이 비어있으면 빌드
     var totalCA = Object.values(WHALE.caList||{}).reduce(function(s,a){return s+(a||[]).length;},0);
     if(totalCA === 0){
       await whaleBuildCAList();
     }
-    // 3. 'all' 모드로 자동 시작
     var allRadio = document.querySelector('input[name="whaleMode"][value="all"]');
     if(allRadio){
       allRadio.checked = true;
@@ -1837,9 +1840,11 @@ setTimeout(async function(){
 }, 1500);
 
 // Railway 워커 WebSocket (옵션 A: 워커가 broadcast)
-// localStorage에 저장된 URL 우선, 없으면 기본값
+// localStorage 우선, 없으면 production URL 기본값
+var RAILWAY_WS_DEFAULT = 'wss://onchain-tracker-production.up.railway.app/ws';
 var RAILWAY_WS_URL = (function(){
-  try { return localStorage.getItem('railway_ws_url') || ''; } catch(e){ return ''; }
+  try { return localStorage.getItem('railway_ws_url') || RAILWAY_WS_DEFAULT; }
+  catch(e){ return RAILWAY_WS_DEFAULT; }
 })();
 
 // Alchemy WebSocket 엔드포인트 (폴백/직접 모드)
