@@ -755,39 +755,63 @@ function uniRun(){
   }
   syncUnifiedCA();
 
-  // 서브탭 4개 모두 백그라운드 실행
-  var ran = [];
-  // 1. 홀더 분석
-  if(typeof startHolder==='function'){
-    try { startHolder(); ran.push('홀더'); } catch(e){ console.warn('startHolder:',e); }
+  function uniLog(stage, status, detail){
+    var rl=document.getElementById('rsLog');
+    if(!rl) return;
+    var col={ok:'#008000',err:'#800000',info:'#000080'}[status]||'#404040';
+    var d=document.createElement('div');
+    d.style.color=col;
+    d.textContent='['+stage+'] '+status+(detail?' — '+detail:'');
+    rl.insertBefore(d, rl.firstChild);
   }
-  // 2. 홀더 모니터링 (잠깐 텀 두고 — 같은 API rate limit 충돌 방지)
+
+  uniLog('통합', 'info', 'CA='+ca.slice(0,10)+'... 4개 모듈 시작');
+
+  // 1. 홀더 분석 (즉시)
+  try {
+    if(typeof startHolder==='function'){
+      startHolder();
+      uniLog('홀더분석','ok','시작');
+    } else uniLog('홀더분석','err','함수 없음');
+  } catch(e){ uniLog('홀더분석','err',e.message); console.error('startHolder:',e); }
+
+  // 2. 홀더 모니터링
   setTimeout(function(){
-    if(typeof startDist==='function'){
-      try { startDist(); ran.push('모니터링'); } catch(e){ console.warn('startDist:',e); }
-    }
-  }, 800);
+    try {
+      if(typeof startDist==='function'){
+        startDist();
+        uniLog('모니터링','ok','시작');
+      } else uniLog('모니터링','err','함수 없음');
+    } catch(e){ uniLog('모니터링','err',e.message); console.error('startDist:',e); }
+  }, 1000);
+
   // 3. 출금 추적
   setTimeout(function(){
-    if(typeof startOutflow==='function'){
-      try { startOutflow(); ran.push('출금'); } catch(e){ console.warn('startOutflow:',e); }
-    }
-  }, 1600);
-  // 4. 감시·클러스터 — 입력 주소 필요해서 자동 실행 조건부
+    try {
+      if(typeof startOutflow==='function'){
+        startOutflow();
+        uniLog('출금추적','ok','시작');
+      } else uniLog('출금추적','err','함수 없음');
+    } catch(e){ uniLog('출금추적','err',e.message); console.error('startOutflow:',e); }
+  }, 2000);
+
+  // 4. 감시·클러스터 — 입력 주소 있을 때만
   setTimeout(function(){
     var wIn = document.getElementById('wInput');
     if(wIn && wIn.value && /0x[a-fA-F0-9]{40}/.test(wIn.value)){
-      var wCA = document.getElementById('wCA');
-      if(wCA) wCA.value = ca;
-      var wCh = document.getElementById('wChain');
-      if(wCh) wCh.value = ((document.getElementById('uniChain')||{}).value||'bsc');
-      if(typeof startWatch==='function'){
-        try { startWatch(); ran.push('감시'); } catch(e){ console.warn('startWatch:',e); }
-      }
+      try {
+        if(typeof startWatch==='function'){
+          startWatch();
+          uniLog('감시','ok','시작');
+        }
+      } catch(e){ uniLog('감시','err',e.message); console.error('startWatch:',e); }
+    } else {
+      uniLog('감시','info','지갑 주소 입력 시 활성');
     }
-  }, 2400);
+  }, 3000);
 
-  showToast && showToast('🔬 통합 분석 시작', '홀더 + 모니터링 + 출금 + 감시 동시 실행', false);
+  if(typeof showToast==='function')
+    showToast('🔬 통합 분석 시작', '홀더 + 모니터링 + 출금 + 감시 동시 실행', false);
 }
 
 // 기존 setProg 후킹 — 우측 사이드바에 미러링
@@ -1981,9 +2005,11 @@ function getPrice(sym) {
 // ════════════════════════════════════════════════════════════
 
 function switchTab(t) {
-  ['h','o','d','w'].forEach(function(p){
-    document.getElementById('pane-'+p).className='pane'+(t===p?' on':'');
-    document.getElementById('tb-'+p).className='tab'+(t===p?' on':'');
+  ['h','o','d','w','signal','smt-flow','smt-wallet','smt-chart','smt-cluster','smt-alert'].forEach(function(p){
+    var pane=document.getElementById('pane-'+p);
+    var tab=document.getElementById('tb-'+p);
+    if(pane) pane.className='pane'+(t===p?' on':'');
+    if(tab) tab.className='tab'+(t===p?' on':'');
   });
 }
 
