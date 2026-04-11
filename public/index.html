@@ -746,8 +746,8 @@ function syncUnifiedCA(){
   });
 }
 
-// 통합 분석 시작 — 4개 서브탭 모두 동시 실행
-function uniRun(){
+// 통합 분석 시작 — 순차 실행 (충돌 방지)
+async function uniRun(){
   var ca=((document.getElementById('uniCA')||{}).value||'').trim();
   if(!/^0x[a-fA-F0-9]{40}$/.test(ca)){
     alert('❌ CA 형식 오류\n\n입력: '+ca+' (길이 '+ca.length+')\n정상: 0x + 40자리 16진수 = 42자');
@@ -757,61 +757,67 @@ function uniRun(){
 
   function uniLog(stage, status, detail){
     var rl=document.getElementById('rsLog');
-    if(!rl) return;
-    var col={ok:'#008000',err:'#800000',info:'#000080'}[status]||'#404040';
-    var d=document.createElement('div');
-    d.style.color=col;
-    d.textContent='['+stage+'] '+status+(detail?' — '+detail:'');
-    rl.insertBefore(d, rl.firstChild);
+    if(rl){
+      var col={ok:'#008000',err:'#800000',info:'#000080',warn:'#808000'}[status]||'#404040';
+      var d=document.createElement('div');
+      d.style.color=col;
+      d.textContent='['+stage+'] '+status+(detail?' — '+detail:'');
+      rl.insertBefore(d, rl.firstChild);
+    }
+    console.log('[uniRun '+stage+']', status, detail||'');
   }
 
-  uniLog('통합', 'info', 'CA='+ca.slice(0,10)+'... 4개 모듈 시작');
+  uniLog('통합', 'info', 'CA='+ca.slice(0,10)+'...');
 
-  // 1. 홀더 분석 (즉시)
+  // 진단: 필수 함수/DOM 체크
+  var diag = [];
+  ['startHolder','startDist','startOutflow','ethScan','getEthKey'].forEach(function(fn){
+    if(typeof window[fn] !== 'function') diag.push('❌ '+fn+' 없음');
+  });
+  ['hCaBsc','dCaBsc','caBsc','hc-bsc','ocBsc','dMinBal','oThresh','oHours','hTop'].forEach(function(id){
+    if(!document.getElementById(id)) diag.push('❌ DOM #'+id+' 없음');
+  });
+  if(!getEthKey()) diag.push('❌ Etherscan 키 없음');
+  if(diag.length){
+    alert('진단 결과:\n\n'+diag.join('\n'));
+    uniLog('진단','err',diag.join(', '));
+    return;
+  }
+  uniLog('진단','ok','모든 의존성 확인됨');
+
+  // 진행 도중 사용자가 서브탭 클릭해서 결과 볼 수 있게 첫 탭은 홀더분석으로
+  if(typeof dashSubTab==='function') dashSubTab('h');
+
+  // 1. 홀더 분석 (먼저, 토큰 정보·홀더 가져옴)
   try {
     if(typeof startHolder==='function'){
+      uniLog('홀더분석','info','시작');
       startHolder();
-      uniLog('홀더분석','ok','시작');
     } else uniLog('홀더분석','err','함수 없음');
   } catch(e){ uniLog('홀더분석','err',e.message); console.error('startHolder:',e); }
 
-  // 2. 홀더 모니터링
+  // 2. 홀더 모니터링 — 5초 후 (홀더분석이 어느 정도 진행된 뒤)
   setTimeout(function(){
     try {
       if(typeof startDist==='function'){
+        uniLog('모니터링','info','시작');
         startDist();
-        uniLog('모니터링','ok','시작');
       } else uniLog('모니터링','err','함수 없음');
     } catch(e){ uniLog('모니터링','err',e.message); console.error('startDist:',e); }
-  }, 1000);
+  }, 5000);
 
-  // 3. 출금 추적
+  // 3. 출금 추적 — 10초 후
   setTimeout(function(){
     try {
       if(typeof startOutflow==='function'){
+        uniLog('출금추적','info','시작');
         startOutflow();
-        uniLog('출금추적','ok','시작');
       } else uniLog('출금추적','err','함수 없음');
     } catch(e){ uniLog('출금추적','err',e.message); console.error('startOutflow:',e); }
-  }, 2000);
-
-  // 4. 감시·클러스터 — 입력 주소 있을 때만
-  setTimeout(function(){
-    var wIn = document.getElementById('wInput');
-    if(wIn && wIn.value && /0x[a-fA-F0-9]{40}/.test(wIn.value)){
-      try {
-        if(typeof startWatch==='function'){
-          startWatch();
-          uniLog('감시','ok','시작');
-        }
-      } catch(e){ uniLog('감시','err',e.message); console.error('startWatch:',e); }
-    } else {
-      uniLog('감시','info','지갑 주소 입력 시 활성');
-    }
-  }, 3000);
+  }, 10000);
 
   if(typeof showToast==='function')
-    showToast('🔬 통합 분석 시작', '홀더 + 모니터링 + 출금 + 감시 동시 실행', false);
+    showToast('🔬 통합 분석', '홀더 → 모니터링(5초) → 출금추적(10초) 순차 실행', false);
 }
 
 // 기존 setProg 후킹 — 우측 사이드바에 미러링
