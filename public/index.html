@@ -3403,13 +3403,82 @@ function renderHTable() {
         '<button class="lnk" style="background:rgba(0,221,255,.05);cursor:pointer;" onclick="openDetailModal(\''+h.addr+'\','+h.bal+',\''+h.pct.toFixed(3)+'\',\''+h.chain+'\',\''+h.ca+'\')">📋 전체</button>'+
       '</td>'+
       '</tr>'+
-      // 상세 패널 행 (입출금 5건)
-      '<tr class="detail-row" id="dr-'+rowId+'" style="display:none;">'+
+      // 상세 패널 행 (입출금 5건 — 기본 표시)
+      '<tr class="detail-row" id="dr-'+rowId+'" style="display:table-row;">'+
         '<td colspan="10" style="padding:0;background:var(--bg);">'+
-          '<div id="dc-'+rowId+'" style="padding:10px 18px;font-size:11px;color:var(--text3);">로딩 중...</div>'+
+          '<div id="dc-'+rowId+'" style="padding:10px 18px;font-size:11px;color:var(--text3);">⏳ 로딩 중...</div>'+
         '</td>'+
       '</tr>';
   }).join('')||'<tr><td colspan="10" style="text-align:center;padding:12px;color:#182c40">필터 결과 없음</td></tr>';
+
+  // 모든 행의 입출금 5건 자동 로드 (순차, rate limit 보호)
+  autoLoadHolderTxs();
+}
+
+var _autoLoadRunning = false;
+async function autoLoadHolderTxs(){
+  if(_autoLoadRunning) return;
+  _autoLoadRunning = true;
+  try {
+    for(var i=0; i<hFiltered.length; i++){
+      if(!_autoLoadRunning) break;
+      var h = hFiltered[i];
+      var rowId = 'r'+i+h.addr.slice(-4);
+      var cell = document.getElementById('dc-'+rowId);
+      if(!cell || cell.dataset.loaded==='1') continue;
+      await loadHolderTxInline(rowId, h.addr, h.chain, h.ca);
+      await sleep(120);
+    }
+  } finally { _autoLoadRunning = false; }
+}
+
+async function loadHolderTxInline(rowId, addr, chain, ca){
+  var cell = document.getElementById('dc-'+rowId);
+  if(!cell) return;
+  if(!getEthKey()){ cell.innerHTML='<span style="color:#800000;">Etherscan API 키 필요</span>'; return; }
+  try {
+    var txs = await ethScan(chain, {
+      module:'account', action:'tokentx',
+      address:addr, contractaddress:ca,
+      page:1, offset:5, sort:'desc'
+    });
+    if(!txs || !Array.isArray(txs) || !txs.length){
+      cell.innerHTML = '<span style="color:#404040;">최근 거래 없음</span>';
+      cell.dataset.loaded='1';
+      return;
+    }
+    var dec = parseInt(txs[0].tokenDecimal||'18')||18;
+    var sym = txs[0].tokenSymbol||'';
+    var exp = CHAIN_EXP[chain]||'';
+    var addrLo = addr.toLowerCase();
+    var rows = txs.map(function(tx){
+      var amt = 0;
+      try{ amt = Number(BigInt(tx.value||'0'))/Math.pow(10,dec); }catch(e){}
+      var isIn = (tx.to||'').toLowerCase()===addrLo;
+      var partner = isIn ? (tx.from||'') : (tx.to||'');
+      var partnerLo = partner.toLowerCase();
+      var partnerLabel = EX_MAP[partnerLo] ? '🏦 '+EX_MAP[partnerLo]
+        : (KNOWN_LP[partnerLo] ? '🔁 LP'
+        : (KNOWN_PROTOCOLS[partnerLo] ? KNOWN_PROTOCOLS[partnerLo].label
+        : '👤 '+partner.slice(0,10)+'...'+partner.slice(-6)));
+      var ts = parseInt(tx.timeStamp||'0')*1000;
+      var dirIcon = isIn ? '<span style="color:#008000;font-weight:700;">▲ IN</span>' : '<span style="color:#800000;font-weight:700;">▼ OUT</span>';
+      var dirColor = isIn ? '#008000' : '#800000';
+      return '<tr style="border-bottom:1px solid #c0c0c0;">'+
+        '<td style="padding:3px 8px;font-size:10px;color:#404040;white-space:nowrap;">'+new Date(ts).toLocaleString('ko',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'})+'</td>'+
+        '<td style="padding:3px 8px;text-align:center;font-size:10px;">'+dirIcon+'</td>'+
+        '<td style="padding:3px 8px;font-size:11px;color:'+dirColor+';font-weight:700;text-align:right;">'+(isIn?'+':'-')+fN(amt)+' '+sym+'</td>'+
+        '<td style="padding:3px 8px;font-size:10px;color:#000;">'+partnerLabel+'</td>'+
+        '<td style="padding:3px 8px;text-align:right;"><a href="'+exp+'/tx/'+tx.hash+'" target="_blank" style="color:#0000ff;font-size:10px;">TX ↗</a></td>'+
+      '</tr>';
+    }).join('');
+    cell.innerHTML = '<div style="background:#ffffff;box-shadow:inset 1px 1px 0 #808080,inset -1px -1px 0 #ffffff;margin:2px 8px;">'+
+      '<table style="width:100%;border-collapse:collapse;">'+rows+'</table>'+
+    '</div>';
+    cell.dataset.loaded='1';
+  } catch(e) {
+    cell.innerHTML = '<span style="color:#800000;font-size:10px;">오류: '+e.message+'</span>';
+  }
 }
 
 // 홀더 행 인라인 입출금 5건 토글
@@ -4375,12 +4444,26 @@ function renderDTable(){
         +'<button class="lnk" style="background:rgba(155,89,182,.08);border-color:rgba(155,89,182,.3);color:var(--purple);cursor:pointer;" onclick="toggleHolderTx(\''+rowId+'\',\''+r.addr+'\',\''+dChainCtx+'\',\''+dCACtx+'\')">🔍 입출금</button>'
         +'<button class="ai-btn" onclick="openAiAnalysis(\''+r.addr+'\',\''+dChainCtx+'\','+r.bal+',\''+r.pct.toFixed(3)+'\',\''+r.type+'\',\''+(r.mainSrc||'')+'\',' +0+','+0+')" style="margin-left:2px;">🤖 AI</button>'
       +'</td></tr>'
-      +'<tr class="detail-row" id="dr-'+rowId+'" style="display:none;">'
+      +'<tr class="detail-row" id="dr-'+rowId+'" style="display:table-row;">'
         +'<td colspan="9" style="padding:0;background:var(--bg);">'
-          +'<div id="dc-'+rowId+'" style="padding:10px 18px;font-size:11px;color:var(--text3);">로딩 중...</div>'
+          +'<div id="dc-'+rowId+'" style="padding:10px 18px;font-size:11px;color:var(--text3);">⏳ 로딩 중...</div>'
         +'</td>'
       +'</tr>';
   }).join('')||'<tr><td colspan="9" style="text-align:center;padding:14px;color:#182c40">필터 결과 없음</td></tr>';
+
+  // 모니터링 행도 자동 로드
+  autoLoadMonitorTxs();
+}
+
+async function autoLoadMonitorTxs(){
+  for(var i=0; i<dFiltered.length; i++){
+    var r = dFiltered[i];
+    var rowId = 'dr'+i+r.addr.slice(-4);
+    var cell = document.getElementById('dc-'+rowId);
+    if(!cell || cell.dataset.loaded==='1') continue;
+    await loadHolderTxInline(rowId, r.addr, dChainCtx, dCACtx);
+    await sleep(120);
+  }
 }
 
 </script>
