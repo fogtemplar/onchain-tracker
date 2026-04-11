@@ -205,15 +205,37 @@ for(const ch of Object.keys(EXCHANGES)) {
   }
 }
 
-// ── LP Position Manager (제외 대상) ──
+// ── LP Position Manager / Pool / Gauge (제외 대상) ──
 const LP_MANAGERS = new Set([
-  '0xc36442b4a4522e871399cd717abdd847ab11fe88', // Uniswap V3 NFT PM
-  '0xbd216513d74c8cf14cf4747e6aaa6420ff64ee9e', // Uniswap V4 PM
-  '0x46a15b0b27311cedf172ab29e4f4766fbe7f4364', // PancakeSwap V3 PM
-  '0x556b9306565093c855aea9ae92a594704c2cd59e', // PancakeSwap MasterChef V3
-  '0x2214a42d8e2a1d20635c2cb0664422c528b6a432', // SushiSwap V3 PM
+  // Uniswap
+  '0xc36442b4a4522e871399cd717abdd847ab11fe88', // V3 NFT PM (multi-chain)
+  '0xbd216513d74c8cf14cf4747e6aaa6420ff64ee9e', // V4 PM
+  // PancakeSwap
+  '0x46a15b0b27311cedf172ab29e4f4766fbe7f4364', // V3 PM
+  '0x556b9306565093c855aea9ae92a594704c2cd59e', // MasterChef V3
+  // SushiSwap
+  '0x2214a42d8e2a1d20635c2cb0664422c528b6a432', // V3 PM
+  // Aerodrome (Base)
+  '0xf2a9280cec5d1bf46232b94580cd62165325567a', // Slipstream NFT PM
+  '0x827922686190790b37229fd06084350e74485b72', // V2 Router (legacy)
+  '0xcf77a3ba9a5ca399b7c97c74d54e5b1beb874e43', // Aerodrome Router
+  // Velodrome (Optimism, Aerodrome fork)
+  '0xa062ae8a9c5e11aaa026fc2670b0d65ccc8b2858', // Slipstream NFT PM
+  // SwapBased / Baseswap (Base)
+  '0x327df1e6de05895d2ab08513aadd9313fe505d86', // BaseSwap V2 Router
+  // Trader Joe
+  '0xb4315e873dbcf96ffd0acd8ea43f689d8c20fb30', // V2.1 LBRouter
+  // QuickSwap (Polygon)
+  '0xa5e0829caced8ffdd4de3c43696c57f7d7a678ff', // V2 Router
+  '0xf5b509bb0909a69b1c207e495f687a596c168e12', // V3 PM
+  // Camelot (Arbitrum)
+  '0xc873fecbd354f5a56e00e710b90ef4201db2448d', // V2 Router
+  '0x00c7f3082833e796a5b3e4bd59f6642ff44dcd15', // V3 NFT PM
 ]);
 const DEX_BLACKLIST = LP_MANAGERS;
+
+// 동적: token CA의 LP pair는 자동 감지 후 추가됨
+// (Aerodrome CL pool 같은 건 toAddress가 pool contract 주소)
 
 // ── DEX 라우터 (스왑 분류용 — 제외 안 함) ──
 const DEX_ROUTERS = new Map([
