@@ -154,8 +154,8 @@ details[open] .karr{transform:rotate(90deg);}
 .tbg{display:inline-block;min-width:22px;padding:2px 7px;margin-left:6px;background:var(--bg3);border-radius:10px;font-size:11px;color:var(--text3);}
 
 /* ─── 패널 ─── */
-.pane{display:none;}
-.pane.on{display:block;}
+.pane{display:none !important;}
+.pane.on{display:block !important;}
 
 /* ─── 컨트롤 바 (탭 내부 설정) ─── */
 .ctrl{padding:16px 24px;background:var(--bg2);border-bottom:1px solid var(--bd);display:flex;gap:20px;flex-wrap:wrap;align-items:flex-end;}
@@ -1465,7 +1465,6 @@ window.addEventListener('DOMContentLoaded', function(){
     <input type="hidden" id="caEth"><input type="hidden" id="caBsc">
     <input type="hidden" id="caArg"><input type="hidden" id="caArb">
     <input type="hidden" id="caPoly"><input type="hidden" id="caBase">
-  </div>
   </div>
 
   <div class="prog">
