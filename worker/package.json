@@ -1,0 +1,16 @@
+{
+  "name": "onchain-whale-worker",
+  "version": "1.0.0",
+  "description": "Real-time whale transfer tracker via Alchemy WebSocket",
+  "main": "index.js",
+  "type": "module",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

@@ -1,0 +1,463 @@
+// ════════════════════════════════════════════════════════════
+// 🐋 Onchain Whale Worker (Real-time)
+// Alchemy WebSocket × 5 chains → Telegram instant alerts
+// ════════════════════════════════════════════════════════════
+
+import WebSocket from 'ws';
+import http from 'http';
+
+// ── Config (env or hardcoded fallback) ──
+const ALCHEMY_KEY = process.env.ALCHEMY_KEY || 'TDTn41PcLHD3pGfG1ilgz';
+const BOT_TOKEN   = process.env.BOT_TOKEN   || '7890873311:AAGMVgMBcFsWg9mcWE5Vi9ernwNPwoq0GVk';
+const CHAT_ID     = process.env.CHAT_ID     || '-1003743061931';
+const MIN_USD     = parseInt(process.env.MIN_USD || '100000');
+const PORT        = parseInt(process.env.PORT || '3000');
+
+// ── Chain config ──
+const CHAINS = {
+  bsc:  { wss: `wss://bnb-mainnet.g.alchemy.com/v2/${ALCHEMY_KEY}`,     http: `https://bnb-mainnet.g.alchemy.com/v2/${ALCHEMY_KEY}`,     name: 'BSC',  exp: 'https://bscscan.com' },
+  eth:  { wss: `wss://eth-mainnet.g.alchemy.com/v2/${ALCHEMY_KEY}`,     http: `https://eth-mainnet.g.alchemy.com/v2/${ALCHEMY_KEY}`,     name: 'ETH',  exp: 'https://etherscan.io' },
+  arb:  { wss: `wss://arb-mainnet.g.alchemy.com/v2/${ALCHEMY_KEY}`,     http: `https://arb-mainnet.g.alchemy.com/v2/${ALCHEMY_KEY}`,     name: 'ARB',  exp: 'https://arbiscan.io' },
+  base: { wss: `wss://base-mainnet.g.alchemy.com/v2/${ALCHEMY_KEY}`,    http: `https://base-mainnet.g.alchemy.com/v2/${ALCHEMY_KEY}`,    name: 'BASE', exp: 'https://basescan.org' },
+  poly: { wss: `wss://polygon-mainnet.g.alchemy.com/v2/${ALCHEMY_KEY}`, http: `https://polygon-mainnet.g.alchemy.com/v2/${ALCHEMY_KEY}`, name: 'POLY', exp: 'https://polygonscan.com' },
+};
+
+const TRANSFER_TOPIC = '0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef';
+
+// ── EXCLUDE list (메이저/스테이블) ──
+const EXCLUDE = new Set([
+  'BTC','WBTC','ETH','WETH','XRP','BNB','SOL','TRX','DOGE','ADA','AVAX',
+  'TON','HBAR','SUI','BCH','LTC','XLM','DOT','POL','MATIC','NEAR','ATOM',
+  'APT','ALGO','VET','FIL','ICP','XDC','KAS','FLR','ETC','CRO','MNT',
+  'ARB','OP','INJ','SEI','STX','TIA','THETA','IOTA','NEO','STRK','ZK','LINK',
+  'USDT','USDC','DAI','BUSD','TUSD','FDUSD','PYUSD','USDE','LUSD','FRAX',
+  'GUSD','USDP','USDD','CRVUSD','GHO','MIM','EURS','USDS','USD1','USDG',
+  'USDF','USDTB','USTB','USDY','USYC','USD0','RLUSD','BFUSD','YLDS',
+  'EURC','USX','USDAI','USDA','AUSD','REUSD','NUSD','FDIT','SATUSD',
+  'BUIDL','OUSG','JTRSY','EUTBL','BCAP','HASH','XAUT','PAXG',
+  'LEO','OKB','BGB','HTX','KCS','GT','WBT','NEXO','HT',
+  'UNI','AAVE','MKR','COMP','CRV','SUSHI','LDO','SNX','CAKE','RPL','PENDLE',
+  'MORPHO','SKY','ONDO','ENA','JUP','ENS','GRT','PYTH','RAY','HNT',
+  'STETH','RETH','WSTETH','CBETH','SFRXETH','EZETH','WEETH','RSETH',
+  'TAO','RENDER','FET','HYPE','PI','QNT','XMR','ZEC','DASH','WLD',
+  'PUMP','BONK','SHIB','PEPE','TRUMP','CC','RAIN','NIGHT','STABLE',
+  'MEMECORE','ASTER','FLOKI','WIF','PENGU',
+  'BSC-USD','BSC-USDT'
+]);
+
+// ── 거래소 hot wallet ──
+const EXCHANGES = {
+  bsc: [
+    { name:'Binance', addr:'0x8894e0a0c962cb723c1976a4421c95949be2d4e3' },
+    { name:'Binance', addr:'0xf977814e90da44bfa03b6295a0616a897441acec' },
+    { name:'OKX',     addr:'0x79f7d32fc680f6d20b12e5f3e3bd5fbf2d73e22d' },
+    { name:'OKX',     addr:'0xbd612a3f30dca67bf60a39fd0d35e39b7ab80774' },
+    { name:'Bybit',   addr:'0xe2fc31f816a9b3a5d7f77ffa59e40e25e6e0d50' },
+    { name:'Bybit',   addr:'0x4f3a120e72c76c22ae802d129f599bfdd677dc6' },
+    { name:'Gate',    addr:'0x68b22215ff74e3606bd5e6c1de8c2d68180c85f7' },
+    { name:'KuCoin',  addr:'0x46705dfff24256421a05d056c29e81bdc09723b8' },
+    { name:'HTX',     addr:'0xf7858da8a6617f7c6d0ff2bcafdb6d2eedf64840' },
+    { name:'Crypto.com', addr:'0x44971abf0251958492fee97da3e5c5ada88b9185' },
+    { name:'MEXC',    addr:'0x4f2d4cc2eab56e8973a8b9ade5d8e3c341e12625' },
+    { name:'MEXC',    addr:'0x4982085c9e2f89f2ecb8131eca71afad896e89cb' },
+    { name:'MEXC',    addr:'0xd1748257f7c6e39a2ff7dfbdf48a1c9fcfba3048' },
+    { name:'Bitget',  addr:'0x0639556f03714a74a5feeaf5736a4a64ff70d206' },
+  ],
+  eth: [
+    { name:'Binance', addr:'0x28c6c06298d514db089934071355e5743bf21d60' },
+    { name:'Binance', addr:'0xbe0eb53f46cd790cd13851d5eff43d12404d33e8' },
+    { name:'Binance', addr:'0xf977814e90da44bfa03b6295a0616a897441acec' },
+    { name:'Binance', addr:'0x5a52e96bacdabb82fd05763e25335261b270efcb' },
+    { name:'Binance', addr:'0x3c783c21a0383057d128bae431894a5c19f9cf06' },
+    { name:'OKX',     addr:'0x6cc5f688a315f3dc28a7781717a9a798a59fda7b' },
+    { name:'OKX',     addr:'0x8103683202aa8da10536036edef04cdd865c225e' },
+    { name:'OKX',     addr:'0xa7efae728d2936e78bda97dc267687568dd593f3' },
+    { name:'Bybit',   addr:'0xf89d7b9c864f589bbf53a82105107622b35eaa40' },
+    { name:'Coinbase',addr:'0x71660c4005ba85c37ccec55d0c4493e66fe775d3' },
+    { name:'Coinbase',addr:'0x503828976d22510aad0201ac7ec88293211d23da' },
+    { name:'Coinbase',addr:'0xa9d1e08c7793af67e9d92fe308d5697fb81d3e43' },
+    { name:'Kraken',  addr:'0x2910543af39aba0cd09dbb2d50200b3e800a63d2' },
+    { name:'Kraken',  addr:'0xae2d4617c862309a3d75a0ffb358c7a5009c673f' },
+    { name:'Gate',    addr:'0x0d0707963952f2fba59dd06f2b425ace40b492fe' },
+    { name:'Gate',    addr:'0x7793cd85c11a924478d358d49b05b37b91b9e181' },
+    { name:'KuCoin',  addr:'0x2b5634c42055806a59e9107ed44d43c426e99d2a' },
+    { name:'KuCoin',  addr:'0x689c56aef474df92d44a1b70850f808488f9769c' },
+    { name:'HTX',     addr:'0xab5c66752a9e8167967685f1450532fb96d5d24f' },
+    { name:'HTX',     addr:'0x6748f50f686bfbca6fe8ad62b22228b87f31ff2b' },
+    { name:'MEXC',    addr:'0x75e89d5979e4f6fba9f97c104c2f0afb3f1dcb88' },
+    { name:'Bitget',  addr:'0x1ab4973a48dc892cd9971ece8e01dcc7688f8f23' },
+    { name:'Crypto.com', addr:'0x6262998ced04146fa42253a5c0af90ca02dfd2a3' },
+    { name:'Bitfinex',addr:'0x77134cbc06cb00b66f4c7e623d5fdbf6777635ec' },
+  ],
+  arb: [
+    { name:'Binance', addr:'0xb38e8c17e38363af6ebdcb3dae12e0243582891d' },
+    { name:'Bybit',   addr:'0x1db92e2eebc8e0c075a02bea49a2935bcd2dfcf4' },
+    { name:'OKX',     addr:'0x461249076d88d0bb5b2f7bb2cd0ffdadf18bc1e3' },
+    { name:'MEXC',    addr:'0x9117ef8d3a7a8cd2f80f33e7b38e0d82a4945dfe' },
+  ],
+  base: [
+    { name:'Binance', addr:'0x3304e22ddaa22bcdc5fca2269b418046ae7b566a' },
+    { name:'Coinbase',addr:'0x3304e22ddaa22bcdc5fca2269b418046ae7b566a' },
+    { name:'Bybit',   addr:'0x3d9819210a31b4961b30ef54be2aed79b9c9cd3b' },
+    { name:'OKX',     addr:'0x461249076d88d0bb5b2f7bb2cd0ffdadf18bc1e3' },
+  ],
+  poly: [
+    { name:'Binance', addr:'0xab5c66752a9e8167967685f1450532fb96d5d24f' },
+    { name:'OKX',     addr:'0x2716b1b3dea3a8d16ef5ca5e5e617a76daa23be2' },
+    { name:'MEXC',    addr:'0x4982085c9e2f89f2ecb8131eca71afad896e89cb' },
+  ],
+};
+
+// 모든 거래소 주소 셋 (CEX→CEX 제외용)
+const EX_SET = new Set();
+const EX_LABEL = new Map(); // addr → name
+for(const ch of Object.keys(EXCHANGES)) {
+  for(const e of EXCHANGES[ch]) {
+    EX_SET.add(e.addr.toLowerCase());
+    EX_LABEL.set(e.addr.toLowerCase(), e.name);
+  }
+}
+
+// ── State ──
+const state = {
+  ws: {},                    // chain → WebSocket
+  reconnect: {},             // chain → timeout
+  priceCache: new Map(),     // ca → {price, ts}
+  metaCache: new Map(),      // chain:ca → {symbol, decimals, totalSupply}
+  binanceWL: null,           // Set
+  binanceWLts: 0,
+  seenHashes: new Set(),     // dedup
+  stats: { detected: 0, sent: 0, errors: 0, startedAt: Date.now() },
+};
+
+// ── Util ──
+function log(...args) { console.log(`[${new Date().toISOString()}]`, ...args); }
+function fN(n) {
+  if (n >= 1e9) return (n / 1e9).toFixed(2) + 'B';
+  if (n >= 1e6) return (n / 1e6).toFixed(2) + 'M';
+  if (n >= 1e3) return (n / 1e3).toFixed(1) + 'K';
+  return n.toFixed(0);
+}
+function addrToTopic(addr) {
+  return '0x' + '0'.repeat(24) + addr.toLowerCase().replace(/^0x/, '');
+}
+function abiDecodeString(hex) {
+  if (!hex || hex === '0x') return '';
+  try {
+    const h = hex.startsWith('0x') ? hex.slice(2) : hex;
+    if (h.length >= 128) {
+      const off = parseInt(h.slice(0, 64), 16);
+      if (off === 32) {
+        const len = parseInt(h.slice(64, 128), 16);
+        if (len > 0 && len <= 64) {
+          let str = '';
+          const chunk = h.slice(128, 128 + len * 2);
+          for (let i = 0; i < chunk.length; i += 2) str += String.fromCharCode(parseInt(chunk.slice(i, i + 2), 16));
+          return str.replace(/[^\x20-\x7E]/g, '').trim();
+        }
+      }
+    }
+    let b = '';
+    for (let j = 0; j < Math.min(64, h.length); j += 2) b += String.fromCharCode(parseInt(h.slice(j, j + 2), 16));
+    return b.replace(/[\x00-\x1F\x7F-\xFF]/g, '').trim();
+  } catch (e) { return ''; }
+}
+
+// ── Alchemy HTTP RPC ──
+async function rpcCall(chain, method, params) {
+  const res = await fetch(CHAINS[chain].http, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ jsonrpc: '2.0', method, params, id: 1 }),
+  });
+  const d = await res.json();
+  if (d.error) throw new Error(d.error.message);
+  return d.result;
+}
+
+async function getTokenMeta(chain, ca) {
+  const key = `${chain}:${ca.toLowerCase()}`;
+  if (state.metaCache.has(key)) return state.metaCache.get(key);
+  try {
+    const [symHex, decHex, supHex] = await Promise.all([
+      rpcCall(chain, 'eth_call', [{ to: ca, data: '0x95d89b41' }, 'latest']),
+      rpcCall(chain, 'eth_call', [{ to: ca, data: '0x313ce567' }, 'latest']),
+      rpcCall(chain, 'eth_call', [{ to: ca, data: '0x18160ddd' }, 'latest']),
+    ]);
+    const symbol = (abiDecodeString(symHex) || '?').toUpperCase();
+    const decimals = parseInt(decHex || '0x12', 16) || 18;
+    let totalSupply = 0;
+    try { totalSupply = Number(BigInt(supHex || '0x0')) / Math.pow(10, decimals); } catch (e) {}
+    const meta = { symbol, decimals, totalSupply };
+    state.metaCache.set(key, meta);
+    return meta;
+  } catch (e) {
+    return { symbol: '?', decimals: 18, totalSupply: 0 };
+  }
+}
+
+// ── Price ──
+async function getPrice(symbol, ca) {
+  const key = symbol.toUpperCase();
+  const cached = state.priceCache.get(key);
+  if (cached && Date.now() - cached.ts < 5 * 60 * 1000) return cached.price;
+  // Binance
+  try {
+    const r = await fetch(`https://api.binance.com/api/v3/ticker/price?symbol=${key}USDT`);
+    if (r.ok) {
+      const d = await r.json();
+      const p = parseFloat(d.price);
+      if (p > 0) {
+        state.priceCache.set(key, { price: p, ts: Date.now() });
+        return p;
+      }
+    }
+  } catch (e) {}
+  // DexScreener
+  try {
+    const r = await fetch(`https://api.dexscreener.com/latest/dex/tokens/${ca}`);
+    if (r.ok) {
+      const d = await r.json();
+      const valid = (d.pairs || []).filter(p => p.priceUsd && parseFloat(p.priceUsd) > 0);
+      if (valid.length) {
+        valid.sort((a, b) => (b.liquidity?.usd || 0) - (a.liquidity?.usd || 0));
+        const p = parseFloat(valid[0].priceUsd);
+        state.priceCache.set(key, { price: p, ts: Date.now() });
+        return p;
+      }
+    }
+  } catch (e) {}
+  return 0;
+}
+
+// ── Binance whitelist ──
+async function loadBinanceWhitelist() {
+  if (state.binanceWL && Date.now() - state.binanceWLts < 24 * 3600 * 1000) return state.binanceWL;
+  const bases = new Set();
+  try {
+    const sr = await fetch('https://api.binance.com/api/v3/exchangeInfo');
+    const sd = await sr.json();
+    (sd.symbols || []).filter(s => s.status === 'TRADING' && ['USDT', 'USDC', 'BTC', 'FDUSD'].includes(s.quoteAsset))
+      .forEach(s => bases.add(s.baseAsset.toUpperCase()));
+  } catch (e) { log('Binance Spot fetch failed:', e.message); }
+  try {
+    const fr = await fetch('https://fapi.binance.com/fapi/v1/exchangeInfo');
+    const fd = await fr.json();
+    (fd.symbols || []).filter(s => s.status === 'TRADING' && s.contractType === 'PERPETUAL')
+      .forEach(s => bases.add(s.baseAsset.toUpperCase()));
+  } catch (e) { log('Binance Futures fetch failed:', e.message); }
+  // CoinGecko fallback
+  if (bases.size < 100) {
+    try {
+      for (let page = 1; page <= 4; page++) {
+        const r = await fetch(`https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=250&page=${page}`);
+        if (r.ok) {
+          const d = await r.json();
+          if (Array.isArray(d)) d.forEach(c => bases.add((c.symbol || '').toUpperCase()));
+        }
+        await new Promise(rs => setTimeout(rs, 200));
+      }
+    } catch (e) { log('CoinGecko fallback failed:', e.message); }
+  }
+  state.binanceWL = bases;
+  state.binanceWLts = Date.now();
+  log(`Binance whitelist loaded: ${bases.size} symbols`);
+  return bases;
+}
+
+// ── Telegram ──
+async function sendTelegram(text) {
+  try {
+    const r = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        chat_id: CHAT_ID,
+        text,
+        parse_mode: 'HTML',
+        disable_web_page_preview: true,
+      }),
+    });
+    if (r.ok) state.stats.sent++;
+  } catch (e) { log('Telegram err:', e.message); state.stats.errors++; }
+}
+
+function formatMessage(r) {
+  const tier = r.usd >= 1e6 ? '🔴 1M+' : r.usd >= 5e5 ? '🟠 500K+' : '🟡 100K+';
+  const supplyStr = r.supplyPct > 0 ? ` (총 공급량의 ${r.supplyPct.toFixed(2)}%)` : '';
+  return `${tier} <b>${r.sym}</b> 전송 감지\n\n` +
+    `💰 가치: <b>$${fN(r.usd)}</b>\n` +
+    `📊 가격: $${r.price < 1 ? r.price.toFixed(6) : r.price.toFixed(4)}\n` +
+    `📦 수량: ${fN(r.amt)} ${r.sym}${supplyStr}\n` +
+    `🔗 네트워크: ${CHAINS[r.chain].name}\n` +
+    `🕐 ${new Date(r.ts).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' })}\n\n` +
+    `🏦 From: <code>${r.from}</code>${r.fromEx ? ' (' + r.fromEx + ')' : ''}\n` +
+    `👤 To: <code>${r.to}</code>${r.toEx ? ' (' + r.toEx + ')' : ''}\n\n` +
+    `<a href="${CHAINS[r.chain].exp}/tx/${r.hash}">TX 보기</a> · ` +
+    `<a href="${CHAINS[r.chain].exp}/token/${r.ca}">토큰</a>`;
+}
+
+// ── Log handler ──
+async function handleLog(chain, log_) {
+  try {
+    const ca = (log_.address || '').toLowerCase();
+    const fromTopic = log_.topics[1] || '';
+    const toTopic = log_.topics[2] || '';
+    const from = '0x' + fromTopic.slice(-40);
+    const to = '0x' + toTopic.slice(-40);
+    const hash = log_.transactionHash;
+    const dedup = `${chain}-${hash}-${log_.logIndex}`;
+    if (state.seenHashes.has(dedup)) return;
+    state.seenHashes.add(dedup);
+    if (state.seenHashes.size > 10000) {
+      const arr = Array.from(state.seenHashes);
+      state.seenHashes = new Set(arr.slice(-7000));
+    }
+
+    // mint/burn 제외
+    if (from === '0x0000000000000000000000000000000000000000') return;
+    if (to === '0x0000000000000000000000000000000000000000') return;
+    if (to === '0x000000000000000000000000000000000000dead') return;
+
+    const fromEx = EX_LABEL.get(from);
+    const toEx = EX_LABEL.get(to);
+    // 거래소 출금 (from이 거래소, to는 외부)만 잡음
+    if (!fromEx) return;
+    if (toEx) return; // CEX→CEX 제외
+
+    // 메타데이터
+    const meta = await getTokenMeta(chain, ca);
+    if (!meta.symbol || meta.symbol === '?') return;
+    if (EXCLUDE.has(meta.symbol)) return;
+
+    // Binance whitelist
+    const BNB = await loadBinanceWhitelist();
+    if (BNB && BNB.size && !BNB.has(meta.symbol)) return;
+
+    // 수량
+    let raw = 0n;
+    try { raw = BigInt(log_.data); } catch (e) {}
+    const amt = Number(raw) / Math.pow(10, meta.decimals);
+    if (amt <= 0) return;
+
+    // 가격
+    const price = await getPrice(meta.symbol, ca);
+    if (!price) return;
+    const usd = amt * price;
+    if (usd < MIN_USD) return;
+
+    // 발행량 %
+    const supplyPct = meta.totalSupply > 0 ? (amt / meta.totalSupply * 100) : 0;
+
+    state.stats.detected++;
+    const r = {
+      chain, sym: meta.symbol, ca, amt, price, usd,
+      from, to, fromEx, toEx, hash, supplyPct,
+      ts: Date.now(),
+    };
+    log_msg(`[${chain.toUpperCase()}] ${meta.symbol} $${fN(usd)} ${fromEx}→${to.slice(0, 8)}…`);
+    await sendTelegram(formatMessage(r));
+  } catch (e) {
+    state.stats.errors++;
+    log('handleLog err:', e.message);
+  }
+}
+
+function log_msg(...args) { log(...args); }
+
+// ── WebSocket connection ──
+function connectChain(chain) {
+  const cfg = CHAINS[chain];
+  log(`[${chain}] WebSocket 연결 중... ${cfg.wss.replace(ALCHEMY_KEY, '***')}`);
+  const ws = new WebSocket(cfg.wss);
+  state.ws[chain] = ws;
+
+  ws.on('open', () => {
+    log(`[${chain}] ✓ 연결됨`);
+    const exchangeAddrs = EXCHANGES[chain] || [];
+    const addrTopics = exchangeAddrs.map(e => addrToTopic(e.addr));
+    const subParams = {
+      topics: [TRANSFER_TOPIC, addrTopics],
+    };
+    ws.send(JSON.stringify({
+      jsonrpc: '2.0',
+      method: 'eth_subscribe',
+      params: ['logs', subParams],
+      id: 1,
+    }));
+  });
+
+  ws.on('message', async (data) => {
+    try {
+      const msg = JSON.parse(data.toString());
+      if (msg.id === 1 && msg.result) {
+        log(`[${chain}] ✓ 구독 시작 (${(EXCHANGES[chain] || []).length}개 거래소)`);
+        return;
+      }
+      if (msg.id === 1 && msg.error) {
+        log(`[${chain}] ❌ 구독 실패:`, msg.error.message);
+        return;
+      }
+      if (msg.method === 'eth_subscription' && msg.params?.result) {
+        await handleLog(chain, msg.params.result);
+      }
+    } catch (e) { log(`[${chain}] msg parse err:`, e.message); }
+  });
+
+  ws.on('error', (err) => log(`[${chain}] ws error:`, err.message));
+
+  ws.on('close', () => {
+    log(`[${chain}] 🔴 연결 끊김 — 5초 후 재연결...`);
+    delete state.ws[chain];
+    state.reconnect[chain] = setTimeout(() => connectChain(chain), 5000);
+  });
+
+  // Keepalive ping (30초)
+  const pingTimer = setInterval(() => {
+    if (ws.readyState === WebSocket.OPEN) {
+      try { ws.ping(); } catch (e) {}
+    } else {
+      clearInterval(pingTimer);
+    }
+  }, 30000);
+}
+
+// ── Health check HTTP server (Railway 헬스체크용) ──
+http.createServer((req, res) => {
+  if (req.url === '/health' || req.url === '/') {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    const uptime = Math.floor((Date.now() - state.stats.startedAt) / 1000);
+    res.end(JSON.stringify({
+      ok: true,
+      uptime_sec: uptime,
+      detected: state.stats.detected,
+      sent: state.stats.sent,
+      errors: state.stats.errors,
+      chains: Object.keys(state.ws).map(c => ({ chain: c, connected: state.ws[c]?.readyState === WebSocket.OPEN })),
+      cache: { prices: state.priceCache.size, meta: state.metaCache.size, seen: state.seenHashes.size },
+      binance_wl: state.binanceWL?.size || 0,
+    }, null, 2));
+  } else {
+    res.writeHead(404);
+    res.end('Not found');
+  }
+}).listen(PORT, () => log(`Health server on :${PORT}`));
+
+// ── Boot ──
+(async () => {
+  log('🐋 Onchain Whale Worker starting...');
+  log(`MIN_USD=${MIN_USD}, chains=${Object.keys(CHAINS).join(',')}`);
+  await loadBinanceWhitelist();
+  for (const chain of Object.keys(CHAINS)) {
+    connectChain(chain);
+  }
+  // 시작 알림
+  await sendTelegram(`🚀 <b>Whale Worker 시작</b>\n5체인 WebSocket 연결 중\n임계값: $${fN(MIN_USD)}+`);
+})();
+
+// Graceful shutdown
+process.on('SIGTERM', () => {
+  log('SIGTERM 받음 — 종료');
+  Object.values(state.ws).forEach(ws => { try { ws.close(); } catch (e) {} });
+  process.exit(0);
+});
