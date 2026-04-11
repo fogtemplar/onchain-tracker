@@ -384,17 +384,19 @@ function connectChain(chain) {
     const exchangeAddrs = EXCHANGES[chain] || [];
 
     if (isBsc) {
-      // BSC: PublicNode 사용, 거래소별 개별 구독 (검증된 방식)
-      exchangeAddrs.forEach((ex, idx) => {
-        ws.send(JSON.stringify({
-          jsonrpc: '2.0',
-          method: 'eth_subscribe',
-          params: ['logs', {
-            topics: [TRANSFER_TOPIC, addrToTopic(ex.addr)]
-          }],
-          id: 1000 + idx,
-        }));
-      });
+      // BSC: PublicNode 순차 구독 (rate limit 방지)
+      (async () => {
+        for (let idx = 0; idx < exchangeAddrs.length; idx++) {
+          const ex = exchangeAddrs[idx];
+          ws.send(JSON.stringify({
+            jsonrpc: '2.0',
+            method: 'eth_subscribe',
+            params: ['logs', { topics: [TRANSFER_TOPIC, addrToTopic(ex.addr)] }],
+            id: 1000 + idx,
+          }));
+          await new Promise(r => setTimeout(r, 200));
+        }
+      })();
     } else {
       // 일반: 한 번에 array
       const addrTopics = exchangeAddrs.map(e => addrToTopic(e.addr));
@@ -413,8 +415,11 @@ function connectChain(chain) {
       // 구독 응답
       if (msg.id != null && msg.result) {
         subIds.add(msg.result);
-        if (!isBsc || subIds.size === (EXCHANGES[chain] || []).length) {
-          log(`[${chain}] ✓ 구독 시작 (${(EXCHANGES[chain] || []).length}개 거래소, ${subIds.size}개 sub)`);
+        if (isBsc) {
+          // 각 응답 즉시 로깅
+          log(`[${chain}] sub ok id=${msg.id} (${subIds.size}/${(EXCHANGES[chain] || []).length})`);
+        } else {
+          log(`[${chain}] ✓ 구독 시작 (${(EXCHANGES[chain] || []).length}개 거래소, 1개 sub)`);
         }
         return;
       }
