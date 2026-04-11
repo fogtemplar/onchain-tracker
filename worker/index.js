@@ -199,19 +199,88 @@ for(const ch of Object.keys(EXCHANGES)) {
   }
 }
 
+// ── DEX / Bridge / Aggregator 블랙리스트 (LP/swap 노이즈 제외) ──
+const DEX_BLACKLIST = new Set([
+  // ─ Uniswap (ETH/Multi) ─
+  '0x7a250d5630b4cf539739df2c5dacb4c659f2488d', // V2 Router
+  '0xe592427a0aece92de3edee1f18e0157c05861564', // V3 Router
+  '0x68b3465833fb72a70ecdf485e0e4c7bd8665fc45', // SwapRouter02
+  '0xef1c6e67703c7bd7107eed8303fbe6ec2554bf6b', // Universal Router
+  '0x66a9893cc07d91d95644aedd05d03f95e1dba8af', // V4 Universal Router
+  '0x5c69bee701ef814a2b6a3edd4b1652cb9cc5aa6f', // V2 Factory
+  '0x1f98431c8ad98523631ae4a59f267346ea31f984', // V3 Factory
+  // ─ PancakeSwap (BSC) ─
+  '0x10ed43c718714eb63d5aa57b78b54704e256024e', // V2 Router
+  '0x13f4ea83d0bd40e75c8222255bc855a974568dd4', // V3 SwapRouter
+  '0x1a0a18ac4becddbd6389559687d1a73d8927e416', // Smart Router
+  '0xca143ce32fe78f1f7019d7d551a6402fc5350c73', // V2 Factory
+  '0x0bfbcf9fa4f9c56b0f40a671ad40e0805a091865', // V3 Factory
+  '0x46a15b0b27311cedf172ab29e4f4766fbe7f4364', // V3 PositionManager
+  // ─ SushiSwap ─
+  '0xd9e1ce17f2641f24ae83637ab66a2cca9c378b9f', // ETH Router
+  '0x1b02da8cb0d097eb8d57a175b88c7d8b47997506', // BSC Router
+  '0x827179dd56d07a7eea93e9c1af0d4a0d9fb86391', // Sushi Smart Router
+  // ─ 1inch ─
+  '0x1111111254fb6c44bac0bed2854e76f90643097d', // V4
+  '0x1111111254eeb25477b68fb85ed929f73a960582', // V5
+  '0x111111125421ca6dc452d289314280a0f8842a65', // V6
+  '0x111111125421ca6dc452d289314280a0f8842a65',
+  // ─ 0x Protocol ─
+  '0xdef1c0ded9bec7f1a1670819833240f027b25eff', // Exchange Proxy
+  '0xdef1abe32c034e558cdd535791643c58a13acc10', // 0x V2
+  // ─ Paraswap ─
+  '0x216b4b4ba9f3e719726886d34a177484278bfcae',
+  '0xdef171fe48cf0115b1d80b88dc8eab59176fee57',
+  '0x6a000f20005980200259b80c5102003040001068',
+  // ─ Kyber/KyberSwap ─
+  '0x6131b5fae19ea4f9d964eac0408e4408b66337b5',
+  '0xc1e7dfe73e1598e3910ef4c7845b68a9ab6f4c83',
+  // ─ Curve ─
+  '0x99a58482bd75cbab83b27ec03ca68ff489b5788f', // Router
+  '0xfa9a30350048b2bf66865ee20363067c66f67e58', // Curve Router NG
+  // ─ Balancer ─
+  '0xba12222222228d8ba445958a75a0704d566bf2c8', // Vault
+  // ─ DODO ─
+  '0xa356867fdcea8e71aeaf87805808803806231fdc',
+  '0xa2398842f37465f89540430bdc00219fa9e4d28a',
+  // ─ ODOS ─
+  '0xcf5540fffcdc3d510b18bfca6d2b9987b0772559',
+  '0xa669e7a0d4b3e4fa48af2de86bd4cd7126be4e13',
+  // ─ Bridges ─
+  '0x4200000000000000000000000000000000000010', // Optimism Bridge
+  '0x99c9fc46f92e8a1c0dec1b1747d010903e884be1', // Optimism L1
+  '0xa3a7b6f88361f48403514059f1f16c8e78d60eec', // Arbitrum Bridge L1
+  '0xcee284f754e854890e311e3280b767f80797180d', // Across Spoke
+  '0x2c2eaff0c1d2c0aa1a0e3d0c4ad5b09c2d6f6e1f', // Stargate
+  '0x8731d54e9d02c286767d56ac03e8037c07e01e98', // Stargate Router
+  '0x150f94b44927f078737562f0fcf3c95c01cc2376', // Stargate ETH
+  '0xc36442b4a4522e871399cd717abdd847ab11fe88', // V3 NFT Position Manager
+  // ─ MEV builders / common bot routers ─
+  '0x6b75d8af000000e20b7a7ddf000ba900b4009a80', // Banana Gun
+  '0x00000000000d8a4b1a9c2bcde60a4f0c0c7c9bd1', // MEV bot common
+]);
+
 // ── State ──
 const state = {
-  ws: {},                    // chain → WebSocket
-  reconnect: {},             // chain → timeout
-  priceCache: new Map(),     // ca → {price, ts}
-  metaCache: new Map(),      // chain:ca → {symbol, decimals, totalSupply}
-  binanceWL: null,           // Set
+  ws: {},                    // chain → WebSocket (cex 전용)
+  wsFull: {},                // chain → WebSocket (full 모드)
+  reconnect: {},
+  priceCache: new Map(),
+  metaCache: new Map(),
+  binanceWL: null,
   binanceWLts: 0,
-  seenHashes: new Set(),     // dedup
+  seenHashes: new Set(),
   stats: { detected: 0, sent: 0, errors: 0, startedAt: Date.now() },
-  recentTxs: [],             // 최근 200건 (브라우저 클라이언트 초기 데이터용)
-  clients: new Set(),        // 연결된 브라우저 WebSocket 클라이언트
+  recentTxs: [],
+  clients: new Set(),
+  caList: { eth: [], bsc: [], arb: [], base: [], poly: [] },  // 풀모드 CA 구독 대상
+  caListTs: 0,
+  lpAddresses: new Set(),    // 동적으로 감지된 LP/pair (handleLog에서 제외)
 };
+
+// SCAN_MODE: 'cex' | 'full'  (env로 토글)
+const SCAN_MODE = (process.env.SCAN_MODE || 'full').toLowerCase();
+console.log(`[CONFIG] SCAN_MODE=${SCAN_MODE}`);
 
 // ── Util ──
 function log(...args) { console.log(`[${new Date().toISOString()}]`, ...args); }
@@ -313,6 +382,75 @@ async function getPrice(symbol, ca) {
   return 0;
 }
 
+// ── CA 리스트 빌드 (CoinGecko top 1000 ∩ Binance whitelist) ──
+async function buildCAList() {
+  const BNB = await loadBinanceWhitelist();
+  if (!BNB || BNB.size === 0) {
+    log('CA build skipped — Binance WL empty');
+    return state.caList;
+  }
+  log('CA list 빌드 시작 (CoinGecko top 1000 페치)...');
+
+  // CoinGecko coins/list?include_platform=true (1회, ~1MB)
+  let coinsList = [];
+  try {
+    const r = await fetch('https://api.coingecko.com/api/v3/coins/list?include_platform=true');
+    if (r.ok) coinsList = await r.json();
+  } catch (e) { log('coins/list err:', e.message); }
+  if (!Array.isArray(coinsList)) {
+    log('coins/list 실패');
+    return state.caList;
+  }
+
+  // markets top 1000 (시총 순)
+  let topCoins = [];
+  try {
+    for (let page = 1; page <= 4; page++) {
+      const r = await fetch(`https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=250&page=${page}`);
+      if (r.ok) {
+        const d = await r.json();
+        if (Array.isArray(d)) topCoins = topCoins.concat(d);
+      }
+      await new Promise(rs => setTimeout(rs, 300));
+    }
+  } catch (e) { log('markets err:', e.message); }
+
+  // id → platforms 인덱스
+  const idToPlatforms = {};
+  coinsList.forEach(c => { idToPlatforms[c.id] = c.platforms || {}; });
+
+  const platformKey = {
+    eth: 'ethereum', bsc: 'binance-smart-chain',
+    arb: 'arbitrum-one', base: 'base', poly: 'polygon-pos',
+  };
+  const newCAList = { eth: [], bsc: [], arb: [], base: [], poly: [] };
+  const seen = new Set();
+
+  topCoins.forEach(c => {
+    const sym = (c.symbol || '').toUpperCase();
+    if (!BNB.has(sym)) return;
+    if (EXCLUDE.has(sym)) return; // 메이저/스테이블 제외
+    const platforms = idToPlatforms[c.id];
+    if (!platforms) return;
+    for (const ch of Object.keys(platformKey)) {
+      const ca = platforms[platformKey[ch]];
+      if (ca && ca.startsWith('0x') && ca.length === 42) {
+        const key = ch + ':' + ca.toLowerCase();
+        if (!seen.has(key)) {
+          newCAList[ch].push(ca.toLowerCase());
+          seen.add(key);
+        }
+      }
+    }
+  });
+
+  state.caList = newCAList;
+  state.caListTs = Date.now();
+  const total = Object.values(newCAList).reduce((s, a) => s + a.length, 0);
+  log(`CA list 빌드 완료: ${total}개 (eth:${newCAList.eth.length} bsc:${newCAList.bsc.length} arb:${newCAList.arb.length} base:${newCAList.base.length} poly:${newCAList.poly.length})`);
+  return newCAList;
+}
+
 // ── Binance whitelist ──
 async function loadBinanceWhitelist() {
   if (state.binanceWL && Date.now() - state.binanceWLts < 24 * 3600 * 1000) return state.binanceWL;
@@ -381,32 +519,44 @@ function formatMessage(r) {
 }
 
 // ── Log handler ──
-async function handleLog(chain, log_) {
+async function handleLog(chain, log_, source) {
   try {
-    // 가장 빠른 early exit: from이 거래소가 아니면 즉시 종료 (BSC 초당 수천건 처리)
     const fromTopic = log_.topics[1] || '';
     const from = '0x' + fromTopic.slice(-40);
-    const fromEx = EX_LABEL.get(from);
-    if (!fromEx) return;
-
     const toTopic = log_.topics[2] || '';
     const to = '0x' + toTopic.slice(-40);
+
+    // CEX 모드: from이 거래소여야만
+    // FULL 모드: from/to 둘 다 검사
+    const fromEx = EX_LABEL.get(from);
     const toEx = EX_LABEL.get(to);
-    if (toEx) return; // CEX→CEX 제외
+
+    if (source === 'cex') {
+      if (!fromEx) return;
+      if (toEx) return; // CEX→CEX 제외
+    } else if (source === 'full') {
+      // CEX→CEX 제외
+      if (fromEx && toEx) return;
+    }
 
     // mint/burn 제외
     if (from === '0x0000000000000000000000000000000000000000') return;
     if (to === '0x0000000000000000000000000000000000000000') return;
     if (to === '0x000000000000000000000000000000000000dead') return;
 
+    // DEX/Bridge/Aggregator 제외 (양방향)
+    if (DEX_BLACKLIST.has(from) || DEX_BLACKLIST.has(to)) return;
+    // 동적 LP pair 제외
+    if (state.lpAddresses.has(from) || state.lpAddresses.has(to)) return;
+
     const ca = (log_.address || '').toLowerCase();
     const hash = log_.transactionHash;
     const dedup = `${chain}-${hash}-${log_.logIndex}`;
     if (state.seenHashes.has(dedup)) return;
     state.seenHashes.add(dedup);
-    if (state.seenHashes.size > 5000) {
+    if (state.seenHashes.size > 50000) {
       const arr = Array.from(state.seenHashes);
-      state.seenHashes = new Set(arr.slice(-3000));
+      state.seenHashes = new Set(arr.slice(-30000));
     }
 
     // 메타데이터
@@ -472,6 +622,91 @@ async function handleLog(chain, log_) {
 
 function log_msg(...args) { log(...args); }
 
+// ── Full mode WebSocket: subscribe to token CAs (Transfer events) ──
+function connectChainFull(chain) {
+  const cas = state.caList[chain] || [];
+  if (cas.length === 0) {
+    log(`[${chain}-full] CA list empty, skipping`);
+    return;
+  }
+  // Alchemy: address 필터 최대 ~1000개 / 일부 RPC는 더 작음
+  // 1000개씩 청크로 나눠서 여러 구독
+  const CHUNK = chain === 'bsc' ? 100 : 1000;
+  const chunks = [];
+  for (let i = 0; i < cas.length; i += CHUNK) chunks.push(cas.slice(i, i + CHUNK));
+
+  const cfg = CHAINS[chain];
+  log(`[${chain}-full] WebSocket 연결 (${cas.length}개 CA, ${chunks.length}개 sub)...`);
+  const ws = new WebSocket(cfg.wss);
+  state.wsFull[chain] = ws;
+  const subIds = new Set();
+
+  ws.on('open', () => {
+    log(`[${chain}-full] ✓ 연결됨`);
+    // BSC는 PublicNode 사용 → 청크 크기 줄임 + 순차 전송
+    if (chain === 'bsc') {
+      (async () => {
+        for (let i = 0; i < chunks.length; i++) {
+          ws.send(JSON.stringify({
+            jsonrpc: '2.0',
+            method: 'eth_subscribe',
+            params: ['logs', { address: chunks[i], topics: [TRANSFER_TOPIC] }],
+            id: 2000 + i,
+          }));
+          await new Promise(r => setTimeout(r, 200));
+        }
+      })();
+    } else {
+      chunks.forEach((chunk, i) => {
+        ws.send(JSON.stringify({
+          jsonrpc: '2.0',
+          method: 'eth_subscribe',
+          params: ['logs', { address: chunk, topics: [TRANSFER_TOPIC] }],
+          id: 2000 + i,
+        }));
+      });
+    }
+  });
+
+  ws.on('message', async (data) => {
+    try {
+      const msg = JSON.parse(data.toString());
+      if (msg.id != null && msg.result) {
+        subIds.add(msg.result);
+        if (subIds.size === chunks.length) {
+          log(`[${chain}-full] ✓ 구독 시작 (${cas.length}개 CA, ${chunks.length}개 sub)`);
+        }
+        return;
+      }
+      if (msg.id != null && msg.error) {
+        log(`[${chain}-full] ❌ 구독 실패 (id=${msg.id}):`, msg.error.message);
+        return;
+      }
+      if (msg.method === 'eth_subscription' && msg.params?.result) {
+        await handleLog(chain, msg.params.result, 'full');
+      }
+    } catch (e) { log(`[${chain}-full] msg parse err:`, e.message); }
+  });
+
+  ws.on('error', (err) => log(`[${chain}-full] ws error:`, err.message));
+
+  ws.on('close', () => {
+    log(`[${chain}-full] 🔴 연결 끊김 — 5초 후 재연결...`);
+    delete state.wsFull[chain];
+    if (state.caList[chain]?.length > 0) {
+      setTimeout(() => connectChainFull(chain), 5000);
+    }
+  });
+
+  const pingTimer = setInterval(() => {
+    if (ws.readyState === WebSocket.OPEN) {
+      try { ws.ping(); } catch (e) {}
+    } else {
+      clearInterval(pingTimer);
+    }
+  }, 30000);
+}
+
 // ── WebSocket connection ──
 function connectChain(chain) {
   const cfg = CHAINS[chain];
@@ -533,7 +768,7 @@ function connectChain(chain) {
         return;
       }
       if (msg.method === 'eth_subscription' && msg.params?.result) {
-        await handleLog(chain, msg.params.result);
+        await handleLog(chain, msg.params.result, 'cex');
       }
     } catch (e) { log(`[${chain}] msg parse err:`, e.message); }
   });
@@ -572,9 +807,11 @@ const httpServer = http.createServer((req, res) => {
     const uptime = Math.floor((Date.now() - state.stats.startedAt) / 1000);
     let dbTotal = 0;
     try { dbTotal = db.prepare('SELECT COUNT(*) AS c FROM txs').get().c; } catch (e) {}
+    const totalCA = Object.values(state.caList).reduce((s, a) => s + a.length, 0);
     res.end(JSON.stringify({
       ok: true,
       uptime_sec: uptime,
+      mode: SCAN_MODE,
       detected: state.stats.detected,
       sent: state.stats.sent,
       errors: state.stats.errors,
@@ -582,9 +819,15 @@ const httpServer = http.createServer((req, res) => {
       recent_txs: state.recentTxs.length,
       db_total: dbTotal,
       db_path: DB_PATH,
-      chains: Object.keys(state.ws).map(c => ({ chain: c, connected: state.ws[c]?.readyState === WebSocket.OPEN })),
+      chains: {
+        cex: Object.keys(state.ws).map(c => ({ chain: c, connected: state.ws[c]?.readyState === WebSocket.OPEN })),
+        full: Object.keys(state.wsFull).map(c => ({ chain: c, connected: state.wsFull[c]?.readyState === WebSocket.OPEN, ca_count: state.caList[c]?.length || 0 })),
+      },
+      ca_total: totalCA,
+      ca_per_chain: Object.fromEntries(Object.entries(state.caList).map(([k, v]) => [k, v.length])),
       cache: { prices: state.priceCache.size, meta: state.metaCache.size, seen: state.seenHashes.size },
       binance_wl: state.binanceWL?.size || 0,
+      dex_blacklist: DEX_BLACKLIST.size,
     }, null, 2));
     return;
   }
@@ -860,18 +1103,44 @@ httpServer.listen(PORT, () => log(`HTTP+WS server on :${PORT}`));
 // ── Boot ──
 (async () => {
   log('🐋 Onchain Whale Worker starting...');
-  log(`MIN_USD=${MIN_USD}, chains=${Object.keys(CHAINS).join(',')}`);
+  log(`MIN_USD=${MIN_USD}, chains=${Object.keys(CHAINS).join(',')}, mode=${SCAN_MODE}`);
   await loadBinanceWhitelist();
-  for (const chain of Object.keys(CHAINS)) {
-    connectChain(chain);
+
+  if (SCAN_MODE === 'full' || SCAN_MODE === 'both') {
+    // CA 리스트 빌드 (CoinGecko top 1000 ∩ Binance)
+    await buildCAList();
+    // 매일 1회 갱신
+    setInterval(() => { buildCAList().catch(e => log('CA rebuild err:', e.message)); }, 86400 * 1000);
   }
-  // 시작 알림
-  await sendTelegram(`🚀 <b>Whale Worker 시작</b>\n5체인 WebSocket 연결 중\n임계값: $${fN(MIN_USD)}+`);
+
+  if (SCAN_MODE === 'cex' || SCAN_MODE === 'both') {
+    for (const chain of Object.keys(CHAINS)) {
+      connectChain(chain);
+    }
+  }
+
+  if (SCAN_MODE === 'full' || SCAN_MODE === 'both') {
+    for (const chain of Object.keys(CHAINS)) {
+      connectChainFull(chain);
+    }
+  }
+
+  const totalCA = Object.values(state.caList).reduce((s, a) => s + a.length, 0);
+  await sendTelegram(
+    `🚀 <b>Whale Worker 시작</b>\n` +
+    `모드: ${SCAN_MODE.toUpperCase()}\n` +
+    `5체인 WebSocket 연결\n` +
+    `임계값: $${fN(MIN_USD)}+\n` +
+    (SCAN_MODE !== 'cex' ? `구독 토큰: ${totalCA}개 CA\n` : '') +
+    `DEX/Bridge ${DEX_BLACKLIST.size}개 블랙리스트`
+  );
 })();
 
 // Graceful shutdown
 process.on('SIGTERM', () => {
   log('SIGTERM 받음 — 종료');
   Object.values(state.ws).forEach(ws => { try { ws.close(); } catch (e) {} });
+  Object.values(state.wsFull).forEach(ws => { try { ws.close(); } catch (e) {} });
+  try { db.close(); } catch (e) {}
   process.exit(0);
 });
