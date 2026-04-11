@@ -3,7 +3,7 @@
 // Alchemy WebSocket × 5 chains → Telegram instant alerts
 // ════════════════════════════════════════════════════════════
 
-import WebSocket from 'ws';
+import WebSocket, { WebSocketServer } from 'ws';
 import http from 'http';
 
 // ── Config (env or hardcoded fallback) ──
@@ -129,6 +129,8 @@ const state = {
   binanceWLts: 0,
   seenHashes: new Set(),     // dedup
   stats: { detected: 0, sent: 0, errors: 0, startedAt: Date.now() },
+  recentTxs: [],             // 최근 200건 (브라우저 클라이언트 초기 데이터용)
+  clients: new Set(),        // 연결된 브라우저 WebSocket 클라이언트
 };
 
 // ── Util ──
@@ -358,6 +360,19 @@ async function handleLog(chain, log_) {
       ts: Date.now(),
     };
     log_msg(`[${chain.toUpperCase()}] ${meta.symbol} $${fN(usd)} ${fromEx}→${to.slice(0, 8)}…`);
+
+    // 메모리 큐 (최근 200건)
+    state.recentTxs.unshift(r);
+    if (state.recentTxs.length > 200) state.recentTxs = state.recentTxs.slice(0, 200);
+
+    // 연결된 브라우저 클라이언트들에게 broadcast
+    const payload = JSON.stringify({ type: 'tx', data: r });
+    for (const client of state.clients) {
+      if (client.readyState === WebSocket.OPEN) {
+        try { client.send(payload); } catch (e) {}
+      }
+    }
+
     await sendTelegram(formatMessage(r));
   } catch (e) {
     state.stats.errors++;
@@ -451,8 +466,17 @@ function connectChain(chain) {
   }, 30000);
 }
 
-// ── Health check HTTP server (Railway 헬스체크용) ──
-http.createServer((req, res) => {
+// ── HTTP server (헬스체크 + 최근 트랜잭션 + WebSocket 업그레이드) ──
+function setCors(res) {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', '*');
+}
+
+const httpServer = http.createServer((req, res) => {
+  setCors(res);
+  if (req.method === 'OPTIONS') { res.writeHead(204); res.end(); return; }
+
   if (req.url === '/health' || req.url === '/') {
     res.writeHead(200, { 'Content-Type': 'application/json' });
     const uptime = Math.floor((Date.now() - state.stats.startedAt) / 1000);
@@ -462,15 +486,58 @@ http.createServer((req, res) => {
       detected: state.stats.detected,
       sent: state.stats.sent,
       errors: state.stats.errors,
+      clients: state.clients.size,
+      recent_txs: state.recentTxs.length,
       chains: Object.keys(state.ws).map(c => ({ chain: c, connected: state.ws[c]?.readyState === WebSocket.OPEN })),
       cache: { prices: state.priceCache.size, meta: state.metaCache.size, seen: state.seenHashes.size },
       binance_wl: state.binanceWL?.size || 0,
     }, null, 2));
-  } else {
-    res.writeHead(404);
-    res.end('Not found');
+    return;
   }
-}).listen(PORT, () => log(`Health server on :${PORT}`));
+
+  if (req.url === '/transactions' || req.url?.startsWith('/transactions?')) {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ ok: true, count: state.recentTxs.length, data: state.recentTxs }));
+    return;
+  }
+
+  res.writeHead(404);
+  res.end('Not found');
+});
+
+// WebSocket server (브라우저 클라이언트용)
+const wss = new WebSocketServer({ server: httpServer, path: '/ws' });
+wss.on('connection', (clientWs, req) => {
+  state.clients.add(clientWs);
+  log(`📡 client connected (total: ${state.clients.size})`);
+
+  // 초기 데이터: 최근 트랜잭션 일괄 전송
+  try {
+    clientWs.send(JSON.stringify({
+      type: 'init',
+      data: state.recentTxs,
+      stats: { detected: state.stats.detected, uptime: Math.floor((Date.now() - state.stats.startedAt)/1000) }
+    }));
+  } catch (e) {}
+
+  // ping 30초마다
+  const pingTimer = setInterval(() => {
+    if (clientWs.readyState === WebSocket.OPEN) {
+      try { clientWs.ping(); } catch (e) {}
+    } else {
+      clearInterval(pingTimer);
+    }
+  }, 30000);
+
+  clientWs.on('close', () => {
+    state.clients.delete(clientWs);
+    clearInterval(pingTimer);
+    log(`📡 client disconnected (total: ${state.clients.size})`);
+  });
+  clientWs.on('error', (e) => log('client ws error:', e.message));
+});
+
+httpServer.listen(PORT, () => log(`HTTP+WS server on :${PORT}`));
 
 // ── Boot ──
 (async () => {
