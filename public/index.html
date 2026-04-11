@@ -6,17 +6,88 @@
 <title>🔬 온체인 트래커 v4 · Smart Money Signal</title>
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Bebas+Neue&display=swap" rel="stylesheet">
 <style>
-/* ─── 기본 변수 ─── */
+/* ═══ Windows 95/98 클래식 테마 ═══ */
 :root{
-  --bg:#010409;--bg2:#0d1117;--bg3:#161b22;--bg4:#1c2128;
-  --bd:#21262d;--bd2:#30363d;
-  --cyan:#00b4d8;--bull:#3fb950;--bear:#f85149;--warn:#d29922;--gold:#e3b341;
-  --white:#e6edf3;--text2:#8b949e;--text3:#484f58;
-  --purple:#a371f7;--blue:#79c0ff;
-  --mono:'JetBrains Mono','Consolas',monospace;
+  --bg:#008080;          /* 클래식 데스크탑 청록 */
+  --bg2:#c0c0c0;         /* 윈도우 회색 */
+  --bg3:#c0c0c0;
+  --bg4:#dfdfdf;         /* 밝은 회색 */
+  --bd:#808080;          /* 음영 회색 */
+  --bd2:#404040;         /* 진한 음영 */
+  --cyan:#000080;        /* 네이비 — 클래식 강조색 */
+  --bull:#008000;        /* 진한 녹색 */
+  --bear:#800000;        /* 진한 적색 */
+  --warn:#808000;        /* 올리브 */
+  --gold:#808000;
+  --white:#000000;       /* 텍스트는 검정 */
+  --text2:#000000;
+  --text3:#404040;
+  --purple:#800080;      /* 진한 보라 */
+  --blue:#0000ff;
+  --mono:'MS Sans Serif','Tahoma','Pixelated MS Sans Serif',sans-serif;
+
+  /* 베벨 그림자 — 윈도우 클래식 핵심 */
+  --bevel-out: inset -1px -1px 0 #000000, inset 1px 1px 0 #ffffff, inset -2px -2px 0 #808080, inset 2px 2px 0 #dfdfdf;
+  --bevel-in: inset 1px 1px 0 #000000, inset -1px -1px 0 #ffffff, inset 2px 2px 0 #808080, inset -2px -2px 0 #dfdfdf;
+  --bevel-thin: inset -1px -1px 0 #808080, inset 1px 1px 0 #ffffff;
 }
 *{box-sizing:border-box;margin:0;padding:0;}
-html,body{min-height:100vh;background:var(--bg);color:var(--white);font-family:var(--mono);font-size:14px;overflow-y:auto;}
+html,body{min-height:100vh;background:var(--bg);color:var(--white);font-family:var(--mono);font-size:11px;overflow-y:auto;-webkit-font-smoothing:none;font-smooth:never;}
+
+/* 모든 패널 베벨 외각 */
+.dash-top,.dash-left,.dash-right,#analyzeBar,.ctrl,.stats,.fbar,.prog,.ai-panel,.kbody,.keys details[open]{
+  background:#c0c0c0 !important;
+  color:#000 !important;
+}
+
+/* 인풋·셀렉트: 베벨 인 (들어간 느낌) */
+.sel,.inp,.ki,.webhook-inp,select,input[type="text"],input[type="password"],input[type="number"],textarea{
+  background:#ffffff !important;
+  color:#000000 !important;
+  border:none !important;
+  box-shadow: var(--bevel-in) !important;
+  border-radius:0 !important;
+  font-family: var(--mono) !important;
+  font-size:11px !important;
+  padding:3px 6px !important;
+}
+.sel:focus,.inp:focus,.ki:focus,.webhook-inp:focus,input:focus,select:focus,textarea:focus{
+  outline:1px dotted #000 !important;
+  outline-offset:-3px !important;
+}
+
+/* 버튼: 베벨 아웃 (튀어나온 느낌) */
+button,.btn-go,.btn-stop,.tab,.fb,.lnk,.ai-btn,.dt-btn,.dt-keys,.preset-btn,.expand-btn{
+  background:#c0c0c0 !important;
+  color:#000000 !important;
+  border:none !important;
+  box-shadow: var(--bevel-out) !important;
+  border-radius:0 !important;
+  font-family: var(--mono) !important;
+  font-size:11px !important;
+  padding:4px 12px !important;
+  cursor:pointer;
+  font-weight:normal !important;
+}
+button:active,.btn-go:active,.fb:active,.lnk:active,.dt-btn:active{
+  box-shadow: var(--bevel-in) !important;
+  padding:5px 11px 3px 13px !important;
+}
+button:disabled{color:#808080 !important;text-shadow:1px 1px 0 #ffffff;cursor:not-allowed;}
+
+/* 강조 버튼은 색상 유지하되 베벨 적용 */
+.btn-go{color:#000080 !important;font-weight:bold !important;}
+.btn-stop{color:#800000 !important;font-weight:bold !important;}
+.dt-btn{color:#000080 !important;font-weight:bold !important;}
+.dt-btn.stop{color:#800000 !important;}
+
+/* 활성 탭/네비 — 눌린 느낌 */
+.tab.on,.nav-btn.on,.sub-tab.on{
+  box-shadow: var(--bevel-in) !important;
+  background:#dfdfdf !important;
+  color:#000080 !important;
+  font-weight:bold !important;
+}
 
 /* ─── 헤더 ─── */
 .hdr{padding:14px 24px;background:var(--bg2);border-bottom:1px solid var(--bd);display:flex;align-items:center;justify-content:space-between;}
@@ -307,6 +378,237 @@ body.dash[data-mode="analyze"]{padding-top:136px;}
   body.dash .keys{position:static;}
   body.dash #unifiedPanel{display:flex;}
 }
+
+/* ═══ Win98 클래식 컴포넌트 오버라이드 ═══ */
+
+/* 데스크탑 배경 */
+body.dash{background:#008080 !important;}
+
+/* 상단 — 윈도우 타이틀바 느낌 */
+.dash-top{
+  background: linear-gradient(90deg,#000080 0%,#1084d0 100%) !important;
+  border-bottom:1px solid #000 !important;
+  height:28px !important;
+  padding:0 4px 0 6px !important;
+}
+.dash-top h1{color:#ffffff !important;font-size:11px !important;font-weight:bold !important;}
+.dash-top .sub{color:#c0c0c0 !important;font-size:10px !important;}
+.dash-top #dashLiveLbl{color:#ffffff !important;}
+body.dash{padding-top:30px !important;}
+
+/* 좌측 네비 — 클래식 패널 */
+.dash-left{
+  background:#c0c0c0 !important;
+  border-right:1px solid #000 !important;
+  box-shadow: inset -1px 0 0 #404040, inset -2px 0 0 #808080, inset 1px 0 0 #ffffff !important;
+  padding-top:4px !important;
+  top:30px !important;
+}
+.dash-left .nav-sec{
+  background:#000080;
+  color:#ffffff !important;
+  padding:2px 6px !important;
+  font-size:10px !important;
+  margin:4px 4px 2px;
+  font-weight:bold;
+}
+.dash-left .nav-btn{
+  background:#c0c0c0 !important;
+  border:none !important;
+  border-left:none !important;
+  padding:5px 8px !important;
+  font-size:11px !important;
+  color:#000 !important;
+  margin:1px 4px;
+  box-shadow: var(--bevel-out);
+}
+.dash-left .nav-btn:hover{background:#dfdfdf !important;}
+.dash-left .nav-btn.on{
+  background:#000080 !important;
+  color:#ffffff !important;
+  box-shadow: var(--bevel-in);
+  font-weight:bold !important;
+}
+.dash-left .nav-btn .badge{background:#ffffff !important;color:#000 !important;border:1px solid #808080;border-radius:0 !important;}
+.dash-left .nav-stat{padding:4px 8px !important;border-top:1px solid #808080;border-bottom:1px solid #ffffff;margin:0 4px;}
+.dash-left .nav-stat .lbl{color:#000 !important;font-size:10px !important;}
+.dash-left .nav-stat .val{color:#000080 !important;font-weight:bold !important;font-size:13px !important;}
+
+/* 우측 사이드바 */
+.dash-right{
+  background:#c0c0c0 !important;
+  border-left:1px solid #000 !important;
+  box-shadow: inset 1px 0 0 #ffffff, inset 2px 0 0 #dfdfdf !important;
+  top:30px !important;
+}
+.dash-right .rs-sec{padding:6px 10px !important;border-bottom:1px solid #808080;border-top:1px solid #ffffff;}
+.dash-right .rs-title{
+  background:#000080;
+  color:#ffffff !important;
+  padding:2px 6px;
+  font-size:10px !important;
+  margin:-2px -4px 6px;
+  font-weight:bold;
+}
+.dash-right .rs-prog-bar{
+  height:14px !important;
+  background:#ffffff !important;
+  box-shadow: var(--bevel-in);
+  border-radius:0 !important;
+}
+.dash-right .rs-prog-fill{
+  background:#000080 !important;
+  background-image: repeating-linear-gradient(90deg,#000080 0,#000080 8px,#1084d0 8px,#1084d0 16px) !important;
+}
+.dash-right .rs-msg{color:#000 !important;}
+.dash-right .rs-log{
+  background:#ffffff !important;
+  box-shadow: var(--bevel-in);
+  font-family:var(--mono) !important;
+  font-size:10px !important;
+  border:none !important;
+  border-radius:0 !important;
+  color:#000 !important;
+}
+
+/* 분석 바 */
+#analyzeBar{
+  top:30px !important;
+  background:#c0c0c0 !important;
+  border-bottom:1px solid #000 !important;
+  box-shadow: inset 0 -1px 0 #404040, inset 0 -2px 0 #808080;
+}
+.sub-tab{
+  background:#c0c0c0 !important;
+  color:#000 !important;
+  border:none !important;
+  box-shadow: var(--bevel-out);
+  margin:4px 2px 0;
+  border-radius:0 !important;
+  padding:4px 12px !important;
+  font-size:11px !important;
+}
+.sub-tab.on{
+  box-shadow: var(--bevel-in);
+  background:#dfdfdf !important;
+  font-weight:bold !important;
+}
+
+/* 패널 영역 */
+.pane{background:#c0c0c0 !important;color:#000 !important;}
+.ctrl,.stats,.fbar,.prog,.kbody{background:#c0c0c0 !important;border-bottom:1px solid #808080 !important;}
+.clbl,.flt,.stl{color:#000 !important;font-size:10px !important;}
+.stv{color:#000080 !important;font-family:var(--mono) !important;}
+.kt,.kh,.klbl{color:#000 !important;}
+.kinfo{background:#ffffff !important;color:#000 !important;box-shadow: var(--bevel-in);border:none !important;border-radius:0 !important;}
+
+/* 테이블 — 클래식 리스트뷰 */
+table{background:#ffffff !important;}
+thead tr{background:#c0c0c0 !important;}
+th{
+  background:#c0c0c0 !important;
+  color:#000 !important;
+  font-size:10px !important;
+  font-weight:bold !important;
+  padding:3px 6px !important;
+  border:1px solid #808080 !important;
+  box-shadow: inset 1px 1px 0 #ffffff;
+  text-transform:none !important;
+  letter-spacing:0 !important;
+}
+td{
+  background:#ffffff !important;
+  color:#000 !important;
+  font-size:11px !important;
+  padding:3px 6px !important;
+  border-bottom:1px dotted #c0c0c0 !important;
+}
+tr:nth-child(even) td{background:#f0f0f0 !important;}
+tr:hover td{background:#000080 !important;color:#ffffff !important;}
+tr:hover td a, tr:hover td span{color:#ffffff !important;}
+
+/* 시그널 카드 */
+#signalRankList{background:#ffffff !important;box-shadow: var(--bevel-in);}
+#signalRankList > div{
+  background:#ffffff !important;
+  color:#000 !important;
+  border-bottom:1px solid #c0c0c0 !important;
+}
+#signalRankList > div:hover{background:#000080 !important;color:#ffffff !important;}
+#signalRankList > div:hover *{color:#ffffff !important;}
+
+/* 시그널 상세 패널 */
+#signalDetailPanel{background:#c0c0c0 !important;box-shadow: var(--bevel-out);border:none !important;}
+
+/* AI 패널 */
+.ai-panel{background:#c0c0c0 !important;border-top:1px solid #ffffff;border-bottom:1px solid #808080;}
+.ai-panel-hdr{background:#000080 !important;color:#ffffff !important;padding:3px 8px !important;}
+.ai-panel-title{color:#ffffff !important;font-size:11px !important;}
+.ai-panel-body{background:#ffffff !important;color:#000 !important;box-shadow: var(--bevel-in);margin:6px;padding:8px !important;}
+
+/* 빈 상태 */
+.emp{background:#c0c0c0 !important;}
+.et{color:#000 !important;}
+.es{color:#404040 !important;}
+.eico{filter:grayscale(1) brightness(0.5);}
+
+/* 토스트 */
+.toast{
+  background:#c0c0c0 !important;
+  color:#000 !important;
+  box-shadow: var(--bevel-out), 2px 2px 0 #000000 !important;
+  border:none !important;
+  border-radius:0 !important;
+}
+
+/* 모달 */
+#detailModal > div > div, #aiModal > div > div, #presetModal{
+  background:#c0c0c0 !important;
+  box-shadow: var(--bevel-out), 4px 4px 0 #000000 !important;
+  border:none !important;
+  border-radius:0 !important;
+}
+
+/* API 키 패널 */
+.keys details[open]{
+  background:#c0c0c0 !important;
+  box-shadow: var(--bevel-out), 4px 4px 0 #000000 !important;
+  border:none !important;
+  border-radius:0 !important;
+}
+.keys summary{background:#000080 !important;color:#ffffff !important;font-size:11px !important;padding:3px 8px !important;}
+
+/* 스크롤바 — 클래식 */
+::-webkit-scrollbar{width:16px;height:16px;background:#c0c0c0;}
+::-webkit-scrollbar-track{background:#c0c0c0;box-shadow: var(--bevel-in);}
+::-webkit-scrollbar-thumb{background:#c0c0c0;box-shadow: var(--bevel-out);border-radius:0;}
+::-webkit-scrollbar-thumb:hover{background:#dfdfdf;}
+::-webkit-scrollbar-button{background:#c0c0c0;box-shadow: var(--bevel-out);height:16px;width:16px;display:block;}
+
+/* 도트 (상태등) */
+.dot{box-shadow: var(--bevel-in);background:#808080 !important;border-radius:50%;}
+.dot.on{background:#00ff00 !important;box-shadow: inset 1px 1px 0 #000, inset -1px -1px 0 #ffffff;animation:none !important;}
+
+/* 모든 폰트 통일 */
+*,button,input,select,textarea,table,td,th,div,span,a{
+  font-family: 'MS Sans Serif','Tahoma',sans-serif !important;
+}
+code,pre,.mono{font-family:'Courier New',monospace !important;}
+
+/* 링크 */
+a{color:#0000ff !important;text-decoration:underline !important;}
+a:visited{color:#800080 !important;}
+
+/* 강조색 텍스트 다시 매핑 */
+[style*="color:var(--bull)"],[style*="color: var(--bull)"]{color:#008000 !important;}
+[style*="color:var(--bear)"],[style*="color: var(--bear)"]{color:#800000 !important;}
+[style*="color:var(--cyan)"],[style*="color: var(--cyan)"]{color:#000080 !important;}
+[style*="color:var(--gold)"],[style*="color: var(--gold)"]{color:#808000 !important;}
+[style*="color:var(--warn)"],[style*="color: var(--warn)"]{color:#808000 !important;}
+[style*="color:var(--purple)"],[style*="color: var(--purple)"]{color:#800080 !important;}
+[style*="color:var(--white)"],[style*="color: var(--white)"]{color:#000000 !important;}
+[style*="color:var(--text2)"],[style*="color: var(--text2)"]{color:#000000 !important;}
+[style*="color:var(--text3)"],[style*="color: var(--text3)"]{color:#404040 !important;}
 </style>
 
 </head>
