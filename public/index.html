@@ -889,9 +889,12 @@ function dashNav(t){
     document.body.removeAttribute('data-mode');
     switchTab(t);
   }
-  // whale 진입 시 anomaly 배지만 백그라운드 로드
-  if(t==='whale' && typeof analyticsLoadAnomalies==='function'){
-    analyticsLoadAnomalies();
+  // whale 진입 시 분석 자동 로드 + auto-refresh 시작
+  if(t==='whale'){
+    if(typeof analyticsRefresh==='function') analyticsRefresh();
+    if(typeof analyticsAutoStart==='function') analyticsAutoStart();
+  } else {
+    if(typeof ANALYTICS!=='undefined' && ANALYTICS.autoTimer) clearInterval(ANALYTICS.autoTimer);
   }
 }
 
@@ -1631,90 +1634,25 @@ window.addEventListener('DOMContentLoaded', function(){
   <div style="padding:30px;text-align:center;color:#404040;">로딩 중...</div>
 </div>
 
-<!-- ═══ WHALE 100K+ TRANSFER PANE ═══ -->
+<!-- ═══ WHALE 100K+ TRANSFER PANE (분석 단독) ═══ -->
 <div class="pane" id="pane-whale">
-  <!-- 서브탭 바 -->
-  <div style="background:#000080;padding:6px 16px;display:flex;gap:0;border-bottom:1px solid #000;">
-    <button class="whale-sub on" id="wsubTab-live" onclick="whaleSubTab('live')">📺 실시간</button>
-    <button class="whale-sub" id="wsubTab-analytics" onclick="whaleSubTab('analytics')">📊 분석<span id="wsubAnomBadge" style="margin-left:6px;background:#fff;color:#000080;padding:1px 6px;font-size:10px;font-weight:bold;border:1px solid #fff;">0</span></button>
+  <!-- 숨겨진 호환 입력들 (다른 함수가 참조해서 에러 방지용) -->
+  <div style="display:none;">
+    <input id="whaleMinUsd" type="number" value="100000">
+    <input id="whaleInterval" value="60">
+    <input id="whaleBnbOnly" type="checkbox" checked>
+    <span id="whaleStatus"></span>
+    <span id="whaleTotal">0</span>
+    <span id="whaleLast"></span>
+    <span id="whaleNext"></span>
+    <span id="whaleScanned">0</span>
+    <span id="whaleBnbCount"></span>
+    <span id="whaleCAcount"></span>
+    <span id="wsubAnomBadge">0</span>
+    <table id="whaleTbl"><tbody id="whaleBody"></tbody></table>
   </div>
 
-  <!-- ═ 실시간 서브탭 ═ -->
-  <div id="wsub-live">
-  <div style="padding:14px 20px;background:#c0c0c0;border-bottom:1px solid #808080;">
-    <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:10px;">
-      <div style="font-size:14px;font-weight:bold;color:#000;">🐋 100K+ 전송 상시 트래킹</div>
-      <span id="whaleStatus" style="font-size:11px;color:#404040;">대기 중</span>
-      <div style="margin-left:auto;display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
-        <label style="font-size:11px;color:#000;">체인:</label>
-        <label style="font-size:11px;"><input type="checkbox" class="whaleChain" value="bsc" checked> BSC</label>
-        <label style="font-size:11px;"><input type="checkbox" class="whaleChain" value="eth" checked> ETH</label>
-        <label style="font-size:11px;"><input type="checkbox" class="whaleChain" value="arb"> ARB</label>
-        <label style="font-size:11px;"><input type="checkbox" class="whaleChain" value="base"> BASE</label>
-        <label style="font-size:11px;"><input type="checkbox" class="whaleChain" value="poly"> POLY</label>
-        <label style="font-size:11px;color:#000;margin-left:8px;">최소 USD:</label>
-        <input id="whaleMinUsd" type="number" value="100000" style="width:90px;font-size:11px;">
-        <label style="font-size:11px;color:#000;margin-left:8px;">간격:</label>
-        <select id="whaleInterval" style="font-size:11px;">
-          <option value="30">30초</option>
-          <option value="60">1분</option>
-          <option value="120" selected>2분</option>
-          <option value="300">5분</option>
-        </select>
-        <label style="font-size:11px;color:#000;margin-left:8px;display:flex;align-items:center;gap:4px;">
-          <input type="checkbox" id="whaleBnbOnly" checked>
-          <span>Binance 상장만</span>
-          <span id="whaleBnbCount" style="color:#000080;font-weight:bold;">(0)</span>
-        </label>
-        <label style="font-size:11px;color:#000;margin-left:8px;display:flex;align-items:center;gap:4px;">
-          <input type="radio" name="whaleMode" value="cex" checked onchange="WHALE.scanMode='cex'">
-          <span>거래소 출금만</span>
-        </label>
-        <label style="font-size:11px;color:#000;display:flex;align-items:center;gap:4px;">
-          <input type="radio" name="whaleMode" value="all" onchange="WHALE.scanMode='all'">
-          <span>전체 전송 (EOA↔EOA 포함)</span>
-          <span id="whaleCAcount" style="color:#800000;font-weight:bold;">(0개 토큰)</span>
-        </label>
-        <button id="whaleStartBtn" onclick="whaleToggle()" style="font-weight:bold;color:#008000;">▶ 시작</button>
-        <button onclick="whaleRefreshBnb()">🔄 Binance 갱신</button>
-        <button onclick="whaleBuildCAList()">📥 CA 매핑 빌드</button>
-        <button onclick="whaleSetRailwayUrl()">🛤 Railway 연결</button>
-        <button onclick="whaleClear()">🗑 비우기</button>
-      </div>
-    </div>
-    <div id="whaleStats" style="display:flex;gap:14px;font-size:11px;color:#000;">
-      <span>총 감지: <b id="whaleTotal">0</b></span>
-      <span>최근 폴링: <b id="whaleLast">—</b></span>
-      <span>다음 폴링: <b id="whaleNext">—</b></span>
-      <span>스캔된 거래소: <b id="whaleScanned">0</b></span>
-    </div>
-  </div>
-  <div style="overflow-x:auto;">
-    <table id="whaleTbl" style="width:100%;border-collapse:collapse;font-size:11px;">
-      <thead>
-        <tr>
-          <th>시간</th>
-          <th>체인</th>
-          <th>토큰</th>
-          <th style="text-align:right;">수량</th>
-          <th style="text-align:right;">공급%</th>
-          <th style="text-align:right;">USD</th>
-          <th>From</th>
-          <th>To</th>
-          <th>위험</th>
-          <th>TX</th>
-        </tr>
-      </thead>
-      <tbody id="whaleBody">
-        <tr><td colspan="10" style="padding:30px;text-align:center;color:#404040;">▶ 시작 버튼을 눌러 실시간 WebSocket 모니터링을 시작하세요</td></tr>
-      </tbody>
-    </table>
-  </div>
-  </div>
-  <!-- ═ /실시간 서브탭 ═ -->
-
-  <!-- ═ 분석 서브탭 ═ -->
-  <div id="wsub-analytics" style="display:none;">
+  <div>
   <div style="padding:14px 20px;background:#c0c0c0;border-bottom:1px solid #808080;">
     <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
       <div style="font-size:14px;font-weight:bold;color:#000;">📊 분석 (Railway DB 기반)</div>
@@ -1870,6 +1808,8 @@ async function analyticsLoadAnomalies(){
       analyticsRenderAnomalies();
       var nb = document.getElementById('wsubAnomBadge');
       if(nb) nb.textContent = d.count;
+      var nbWhale = document.getElementById('nbWhaleCount');
+      if(nbWhale) nbWhale.textContent = d.count;
     }
   } catch(e){ console.warn('anomalies err:', e); }
 }
@@ -2020,45 +1960,9 @@ async function whaleBuildCAList(){
   }
 }
 
-// 페이지 로드 시 캐시 복원 + 자동 시작
-setTimeout(async function(){
-  try {
-    var raw = localStorage.getItem('whale_calist_v1');
-    if(raw){
-      var d = JSON.parse(raw);
-      if(Date.now()-d.ts < 86400000*7){ // 7일 TTL
-        WHALE.caList = d.data;
-        var total = Object.values(d.data).reduce(function(s,a){return s+a.length;},0);
-        var el = document.getElementById('whaleCAcount');
-        if(el) el.textContent = '('+total+'개)';
-      }
-    }
-  } catch(e){}
-
-  // 자동 시작 시퀀스
-  try {
-    // Railway 모드면 즉시 연결 (CA 매핑/Binance 빌드 불필요 — 워커가 다 함)
-    if(RAILWAY_WS_URL){
-      if(!WHALE.active) whaleStart();
-      return;
-    }
-    // 폴백: Alchemy 직접 모드 (Railway URL 없을 때만)
-    await whaleEnsureBnb();
-    var totalCA = Object.values(WHALE.caList||{}).reduce(function(s,a){return s+(a||[]).length;},0);
-    if(totalCA === 0){
-      await whaleBuildCAList();
-    }
-    var allRadio = document.querySelector('input[name="whaleMode"][value="all"]');
-    if(allRadio){
-      allRadio.checked = true;
-      WHALE.scanMode = 'all';
-    }
-    if(!WHALE.active){
-      whaleStart();
-    }
-  } catch(e){
-    console.warn('자동 시작 실패:', e);
-  }
+// 페이지 로드 시 분석 데이터 자동 로드 (whale 진입 안 해도 배지 갱신)
+setTimeout(function(){
+  if(typeof analyticsLoadAnomalies === 'function') analyticsLoadAnomalies();
 }, 1500);
 
 // Railway 워커 WebSocket (옵션 A: 워커가 broadcast)
