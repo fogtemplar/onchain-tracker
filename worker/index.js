@@ -640,6 +640,173 @@ const httpServer = http.createServer((req, res) => {
     return;
   }
 
+  // /analytics/freq?days=1|7|30  → 토큰별 빈도 + USD + 평균 + 스파크라인
+  if (req.url?.startsWith('/analytics/freq')) {
+    try {
+      const u = new URL(req.url, 'http://x');
+      const days = parseInt(u.searchParams.get('days') || '7');
+      const fromTs = Date.now() - days * 86400 * 1000;
+      // 토큰별 집계
+      const rows = db.prepare(`
+        SELECT
+          sym,
+          chain,
+          COUNT(*) AS cnt,
+          SUM(usd) AS total_usd,
+          AVG(usd) AS avg_usd,
+          MAX(usd) AS max_usd,
+          MIN(ts) AS first_ts,
+          MAX(ts) AS last_ts
+        FROM txs
+        WHERE ts >= ?
+        GROUP BY sym, chain
+        ORDER BY cnt DESC
+        LIMIT 200
+      `).all(fromTs);
+
+      // 각 토큰의 일별 분포 (스파크라인용)
+      const sparkStmt = db.prepare(`
+        SELECT
+          CAST((ts - ?) / 86400000 AS INTEGER) AS day_idx,
+          COUNT(*) AS cnt
+        FROM txs
+        WHERE ts >= ? AND sym = ? AND chain = ?
+        GROUP BY day_idx
+      `);
+      rows.forEach(r => {
+        const buckets = new Array(days).fill(0);
+        const dist = sparkStmt.all(fromTs, fromTs, r.sym, r.chain);
+        dist.forEach(d => {
+          if (d.day_idx >= 0 && d.day_idx < days) buckets[d.day_idx] = d.cnt;
+        });
+        r.spark = buckets;
+      });
+
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: true, days, count: rows.length, data: rows }));
+    } catch (e) {
+      res.writeHead(500);
+      res.end(JSON.stringify({ ok: false, error: e.message }));
+    }
+    return;
+  }
+
+  // /analytics/anomalies → 5가지 이상 신호 종합
+  if (req.url?.startsWith('/analytics/anomalies')) {
+    try {
+      const now = Date.now();
+      const anomalies = [];
+
+      // 1. 폭증 (24h 횟수 > 7일 평균 × 3, 최소 5건)
+      const spikes = db.prepare(`
+        WITH h24 AS (
+          SELECT sym, chain, COUNT(*) AS cnt, SUM(usd) AS total_usd
+          FROM txs
+          WHERE ts >= ?
+          GROUP BY sym, chain
+        ),
+        avg7 AS (
+          SELECT sym, chain, COUNT(*)/7.0 AS avg_daily
+          FROM txs
+          WHERE ts >= ? AND ts < ?
+          GROUP BY sym, chain
+        )
+        SELECT h24.sym, h24.chain, h24.cnt, h24.total_usd,
+               COALESCE(avg7.avg_daily, 0.5) AS avg_daily
+        FROM h24
+        LEFT JOIN avg7 ON h24.sym = avg7.sym AND h24.chain = avg7.chain
+        WHERE h24.cnt >= 5 AND h24.cnt > COALESCE(avg7.avg_daily, 0.5) * 3
+        ORDER BY (h24.cnt * 1.0 / COALESCE(avg7.avg_daily, 0.5)) DESC
+        LIMIT 20
+      `).all(now - 86400000, now - 7 * 86400000, now - 86400000);
+      spikes.forEach(s => anomalies.push({
+        type: 'spike',
+        severity: s.cnt > s.avg_daily * 5 ? 'high' : 'med',
+        title: `${s.sym} 폭증 (${s.chain.toUpperCase()})`,
+        desc: `24h ${s.cnt}건 (7일 평균 ${s.avg_daily.toFixed(1)}건의 ${(s.cnt / s.avg_daily).toFixed(1)}x ↑)`,
+        sym: s.sym, chain: s.chain, value: s.cnt, total_usd: s.total_usd,
+      }));
+
+      // 2. 메가 트랜잭션 (24h, $5M+)
+      const megas = db.prepare(`
+        SELECT * FROM txs
+        WHERE ts >= ? AND usd >= 5000000
+        ORDER BY usd DESC
+        LIMIT 20
+      `).all(now - 86400000);
+      megas.forEach(m => anomalies.push({
+        type: 'mega',
+        severity: m.usd >= 1e7 ? 'high' : 'med',
+        title: `🐋 메가 트랜잭션 $${(m.usd/1e6).toFixed(2)}M ${m.sym}`,
+        desc: `${m.ex_from || '?'} → ${m.addr_to.slice(0,10)}…`,
+        sym: m.sym, chain: m.chain, ts: m.ts, hash: m.hash, total_usd: m.usd,
+      }));
+
+      // 3. 클러스터 (1시간 내 같은 거래소→같은 토큰 5건+)
+      const clusters = db.prepare(`
+        SELECT ex_from, sym, chain, COUNT(*) AS cnt, SUM(usd) AS total_usd, MIN(ts) AS first, MAX(ts) AS last
+        FROM txs
+        WHERE ts >= ? AND ex_from IS NOT NULL
+        GROUP BY ex_from, sym, chain
+        HAVING cnt >= 5
+        ORDER BY cnt DESC
+        LIMIT 20
+      `).all(now - 3600000);
+      clusters.forEach(c => anomalies.push({
+        type: 'cluster',
+        severity: c.cnt >= 10 ? 'high' : 'med',
+        title: `🔁 클러스터: ${c.ex_from} → ${c.sym}`,
+        desc: `1시간 내 ${c.cnt}건, $${(c.total_usd/1e6).toFixed(2)}M`,
+        sym: c.sym, chain: c.chain, value: c.cnt, total_usd: c.total_usd,
+      }));
+
+      // 4. 신규 토큰 (24h 내 첫 등장)
+      const newcomers = db.prepare(`
+        SELECT sym, chain, COUNT(*) AS cnt, SUM(usd) AS total_usd, MIN(ts) AS first_seen
+        FROM txs
+        WHERE ts >= ?
+          AND (sym, chain) NOT IN (
+            SELECT DISTINCT sym, chain FROM txs WHERE ts < ?
+          )
+        GROUP BY sym, chain
+        ORDER BY total_usd DESC
+        LIMIT 20
+      `).all(now - 86400000, now - 86400000);
+      newcomers.forEach(n => anomalies.push({
+        type: 'newcomer',
+        severity: n.total_usd >= 1e6 ? 'high' : 'med',
+        title: `🎯 신규: ${n.sym} (${n.chain.toUpperCase()})`,
+        desc: `24h 내 첫 등장, ${n.cnt}건 $${(n.total_usd/1e6).toFixed(2)}M`,
+        sym: n.sym, chain: n.chain, value: n.cnt, total_usd: n.total_usd, ts: n.first_seen,
+      }));
+
+      // 5. 단일 수신자 누적 (24h, 3개+ 토큰, $500K+)
+      const accumulators = db.prepare(`
+        SELECT addr_to, COUNT(DISTINCT sym) AS uniq_syms, COUNT(*) AS cnt, SUM(usd) AS total_usd
+        FROM txs
+        WHERE ts >= ?
+        GROUP BY addr_to
+        HAVING uniq_syms >= 3 AND total_usd >= 500000
+        ORDER BY total_usd DESC
+        LIMIT 20
+      `).all(now - 86400000);
+      accumulators.forEach(a => anomalies.push({
+        type: 'accumulator',
+        severity: a.total_usd >= 2e6 ? 'high' : 'med',
+        title: `📈 누적 수신자 ${a.addr_to.slice(0,10)}…`,
+        desc: `24h ${a.uniq_syms}개 토큰 ${a.cnt}건 $${(a.total_usd/1e6).toFixed(2)}M`,
+        addr: a.addr_to, value: a.uniq_syms, total_usd: a.total_usd,
+      }));
+
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: true, count: anomalies.length, data: anomalies }));
+    } catch (e) {
+      res.writeHead(500);
+      res.end(JSON.stringify({ ok: false, error: e.message }));
+    }
+    return;
+  }
+
   res.writeHead(404);
   res.end('Not found');
 });

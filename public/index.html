@@ -634,6 +634,7 @@ a:visited{color:#800080 !important;}
   <button class="nav-btn on" id="nv-signal" onclick="dashNav('signal')"><span class="ico">⚡</span>시그널 랭킹</button>
   <button class="nav-btn" id="nv-analyze" onclick="dashNav('analyze')"><span class="ico">🔬</span>토큰 분석</button>
   <button class="nav-btn" id="nv-whale" onclick="dashNav('whale')"><span class="ico">🐋</span>100K+ 전송<span class="badge" id="nbWhaleCount">0</span></button>
+  <button class="nav-btn" id="nv-analytics" onclick="dashNav('analytics')"><span class="ico">📊</span>분석 대시보드<span class="badge" id="nbAnomCount">0</span></button>
   <button class="nav-btn" id="nv-exclude" onclick="dashNav('exclude')"><span class="ico">🚫</span>제외 리스트<span class="badge" id="nbExCount">—</span></button>
 
   <div class="nav-sec" style="margin-top:8px;">파이프라인 통계</div>
@@ -1710,6 +1711,219 @@ window.addEventListener('DOMContentLoaded', function(){
     </table>
   </div>
 </div>
+
+<!-- ═══ ANALYTICS PANE ═══ -->
+<div class="pane" id="pane-analytics">
+  <div style="padding:14px 20px;background:#c0c0c0;border-bottom:1px solid #808080;">
+    <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+      <div style="font-size:14px;font-weight:bold;color:#000;">📊 100K+ 분석 대시보드</div>
+      <span id="analyticsStatus" style="font-size:11px;color:#404040;">대기 중</span>
+      <div style="margin-left:auto;display:flex;gap:6px;align-items:center;">
+        <label style="font-size:11px;color:#000;display:flex;align-items:center;gap:4px;">
+          <input type="checkbox" id="analyticsAuto" checked> 30초 자동갱신
+        </label>
+        <button onclick="analyticsRefresh()">🔄 새로고침</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 이상 신호 섹션 -->
+  <div style="padding:14px 20px;background:#c0c0c0;border-bottom:2px solid #404040;">
+    <div style="font-size:12px;font-weight:bold;color:#800000;margin-bottom:10px;">🚨 이상 신호 감지</div>
+    <div id="anomalyList" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:10px;">
+      <div style="padding:20px;text-align:center;color:#404040;font-size:11px;grid-column:1/-1;">데이터 로딩 중...</div>
+    </div>
+  </div>
+
+  <!-- 토큰 빈도 섹션 -->
+  <div style="padding:14px 20px;background:#c0c0c0;">
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;">
+      <div style="font-size:12px;font-weight:bold;color:#000080;">📊 토큰별 100K+ 전송 빈도</div>
+      <div style="display:flex;gap:0;margin-left:auto;">
+        <button class="freq-tab" id="freqTab1" onclick="analyticsLoadFreq(1)">1일</button>
+        <button class="freq-tab on" id="freqTab7" onclick="analyticsLoadFreq(7)">7일</button>
+        <button class="freq-tab" id="freqTab30" onclick="analyticsLoadFreq(30)">30일</button>
+      </div>
+      <select id="freqSort" onchange="analyticsRenderFreq()" style="font-size:11px;">
+        <option value="cnt">횟수순</option>
+        <option value="total_usd">USD순</option>
+        <option value="avg_usd">평균순</option>
+        <option value="last_ts">최근순</option>
+      </select>
+    </div>
+    <div style="overflow-x:auto;">
+      <table id="freqTbl" style="width:100%;border-collapse:collapse;font-size:11px;">
+        <thead>
+          <tr>
+            <th style="text-align:center;">#</th>
+            <th>토큰</th>
+            <th>체인</th>
+            <th style="text-align:right;">횟수</th>
+            <th style="text-align:right;">총 USD</th>
+            <th style="text-align:right;">평균</th>
+            <th style="text-align:right;">최대</th>
+            <th>분포</th>
+            <th>최근</th>
+          </tr>
+        </thead>
+        <tbody id="freqBody">
+          <tr><td colspan="9" style="padding:30px;text-align:center;color:#404040;">로딩 중...</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<style>
+.freq-tab{background:#c0c0c0!important;border:none!important;box-shadow:inset -1px -1px 0 #000,inset 1px 1px 0 #fff,inset -2px -2px 0 #808080,inset 2px 2px 0 #dfdfdf!important;padding:4px 14px!important;font-size:11px!important;cursor:pointer;color:#000!important;}
+.freq-tab.on{box-shadow:inset 1px 1px 0 #000,inset -1px -1px 0 #fff,inset 2px 2px 0 #808080,inset -2px -2px 0 #dfdfdf!important;background:#dfdfdf!important;font-weight:bold!important;color:#000080!important;}
+.anom-card{background:#fff;box-shadow:inset 1px 1px 0 #808080,inset -1px -1px 0 #fff;padding:10px 12px;font-size:11px;color:#000;}
+.anom-card.high{box-shadow:inset 1px 1px 0 #800000,inset -1px -1px 0 #ff8080;background:#ffe5e5;}
+.anom-title{font-weight:bold;font-size:12px;margin-bottom:4px;}
+.anom-desc{color:#404040;font-size:10px;line-height:1.6;}
+.spark-bar{display:inline-block;width:6px;background:#000080;margin-right:1px;vertical-align:bottom;}
+</style>
+
+<script>
+// ════════════════════════════════════════════════════════════
+// 📊 분석 대시보드
+// ════════════════════════════════════════════════════════════
+var ANALYTICS = {
+  freqData: [],
+  freqDays: 7,
+  anomalies: [],
+  autoTimer: null,
+};
+
+function analyticsHttpBase(){
+  if(!RAILWAY_WS_URL) return null;
+  return RAILWAY_WS_URL.replace(/^wss?:/, RAILWAY_WS_URL.startsWith('wss')?'https:':'http:').replace(/\/ws$/, '');
+}
+
+async function analyticsLoadFreq(days){
+  ANALYTICS.freqDays = days;
+  ['1','7','30'].forEach(function(d){
+    var b=document.getElementById('freqTab'+d);
+    if(b) b.className = 'freq-tab'+(parseInt(d)===days?' on':'');
+  });
+  var base = analyticsHttpBase();
+  if(!base){ document.getElementById('freqBody').innerHTML = '<tr><td colspan="9" style="text-align:center;color:#800000;">Railway URL 미설정</td></tr>'; return; }
+  document.getElementById('analyticsStatus').textContent = '📥 빈도 데이터 로드 중 ('+days+'일)...';
+  try {
+    var r = await fetch(base+'/analytics/freq?days='+days, {signal: AbortSignal.timeout(20000)});
+    var d = await r.json();
+    if(d.ok){
+      ANALYTICS.freqData = d.data;
+      analyticsRenderFreq();
+      document.getElementById('analyticsStatus').textContent = '✓ '+d.count+'개 토큰 ('+days+'일)';
+    }
+  } catch(e){
+    document.getElementById('freqBody').innerHTML = '<tr><td colspan="9" style="text-align:center;color:#800000;">로드 실패: '+e.message+'</td></tr>';
+  }
+}
+
+function analyticsRenderFreq(){
+  var sort = document.getElementById('freqSort').value;
+  var arr = ANALYTICS.freqData.slice().sort(function(a,b){
+    if(sort==='last_ts') return b.last_ts - a.last_ts;
+    return (b[sort]||0) - (a[sort]||0);
+  });
+  if(!arr.length){
+    document.getElementById('freqBody').innerHTML = '<tr><td colspan="9" style="padding:30px;text-align:center;color:#404040;">데이터 없음</td></tr>';
+    return;
+  }
+  var maxCnt = Math.max.apply(null, arr.map(function(r){return Math.max.apply(null,r.spark||[1]);}));
+  var chainColor = {eth:'#627eea',bsc:'#f0b90b',arb:'#28a0f0',base:'#0052ff',poly:'#8247e5'};
+  document.getElementById('freqBody').innerHTML = arr.slice(0,100).map(function(r,i){
+    var ago = tAgo(r.last_ts/1000);
+    var spark = (r.spark||[]).map(function(v){
+      var h = maxCnt > 0 ? Math.max(2, Math.round(v/maxCnt*16)) : 2;
+      var c = v >= maxCnt*0.7 ? '#800000' : v >= maxCnt*0.3 ? '#808000' : '#000080';
+      return '<span class="spark-bar" style="height:'+h+'px;background:'+c+';" title="'+v+'건"></span>';
+    }).join('');
+    return '<tr style="cursor:pointer;" onclick="analyticsTokenDetail(\''+r.sym+'\',\''+r.chain+'\')">'+
+      '<td style="text-align:center;color:#404040;">'+(i+1)+'</td>'+
+      '<td style="font-weight:bold;">'+r.sym+'</td>'+
+      '<td><span style="color:'+(chainColor[r.chain]||'#000')+';font-weight:bold;">'+r.chain.toUpperCase()+'</span></td>'+
+      '<td style="text-align:right;font-weight:bold;color:#000080;">'+r.cnt+'</td>'+
+      '<td style="text-align:right;font-weight:bold;">$'+fN(r.total_usd)+'</td>'+
+      '<td style="text-align:right;color:#404040;">$'+fN(r.avg_usd)+'</td>'+
+      '<td style="text-align:right;color:#800000;">$'+fN(r.max_usd)+'</td>'+
+      '<td style="white-space:nowrap;">'+spark+'</td>'+
+      '<td style="color:#404040;font-size:10px;white-space:nowrap;">'+ago+'</td>'+
+    '</tr>';
+  }).join('');
+}
+
+async function analyticsLoadAnomalies(){
+  var base = analyticsHttpBase();
+  if(!base) return;
+  try {
+    var r = await fetch(base+'/analytics/anomalies', {signal: AbortSignal.timeout(20000)});
+    var d = await r.json();
+    if(d.ok){
+      ANALYTICS.anomalies = d.data;
+      analyticsRenderAnomalies();
+      var nb = document.getElementById('nbAnomCount');
+      if(nb) nb.textContent = d.count;
+    }
+  } catch(e){ console.warn('anomalies err:', e); }
+}
+
+function analyticsRenderAnomalies(){
+  var arr = ANALYTICS.anomalies;
+  if(!arr.length){
+    document.getElementById('anomalyList').innerHTML = '<div style="padding:20px;text-align:center;color:#404040;font-size:11px;grid-column:1/-1;">감지된 이상 신호 없음</div>';
+    return;
+  }
+  // severity 우선 정렬
+  arr.sort(function(a,b){
+    if(a.severity !== b.severity) return a.severity==='high' ? -1 : 1;
+    return (b.total_usd||0) - (a.total_usd||0);
+  });
+  document.getElementById('anomalyList').innerHTML = arr.map(function(a){
+    var typeIcon = {spike:'🌋', mega:'🐋', cluster:'🔁', newcomer:'🎯', accumulator:'📈'}[a.type] || '⚡';
+    return '<div class="anom-card '+(a.severity==='high'?'high':'')+'">'+
+      '<div class="anom-title">'+typeIcon+' '+a.title+'</div>'+
+      '<div class="anom-desc">'+a.desc+'</div>'+
+      (a.total_usd ? '<div style="margin-top:4px;color:#000080;font-weight:bold;">총액: $'+fN(a.total_usd)+'</div>' : '')+
+    '</div>';
+  }).join('');
+}
+
+function analyticsRefresh(){
+  analyticsLoadFreq(ANALYTICS.freqDays);
+  analyticsLoadAnomalies();
+}
+
+function analyticsTokenDetail(sym, chain){
+  // TODO: 클릭 시 해당 토큰의 모든 트랜잭션 표시
+  alert(sym+' / '+chain.toUpperCase()+'\n\n상세 화면 추후 추가 예정');
+}
+
+// 자동 새로고침
+function analyticsAutoStart(){
+  if(ANALYTICS.autoTimer) clearInterval(ANALYTICS.autoTimer);
+  if(document.getElementById('analyticsAuto')?.checked){
+    ANALYTICS.autoTimer = setInterval(analyticsRefresh, 30000);
+  }
+}
+
+// dashNav가 analytics 호출 시 자동 로드
+var _origDashNav = window.dashNav;
+window.dashNav = function(t){
+  if(_origDashNav) _origDashNav(t);
+  if(t === 'analytics'){
+    analyticsRefresh();
+    analyticsAutoStart();
+  } else {
+    if(ANALYTICS.autoTimer) clearInterval(ANALYTICS.autoTimer);
+  }
+};
+document.addEventListener('change', function(e){
+  if(e.target?.id === 'analyticsAuto') analyticsAutoStart();
+});
+</script>
 
 <script>
 // ════════════════════════════════════════════════════════════
@@ -3037,7 +3251,7 @@ function getPrice(sym) {
 // ════════════════════════════════════════════════════════════
 
 function switchTab(t) {
-  ['h','o','d','w','signal','exclude','whale','smt-flow','smt-wallet','smt-chart','smt-cluster','smt-alert'].forEach(function(p){
+  ['h','o','d','w','signal','exclude','whale','analytics','smt-flow','smt-wallet','smt-chart','smt-cluster','smt-alert'].forEach(function(p){
     var pane=document.getElementById('pane-'+p);
     var tab=document.getElementById('tb-'+p);
     if(pane) pane.className='pane'+(t===p?' on':'');
