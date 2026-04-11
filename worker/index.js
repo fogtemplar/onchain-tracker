@@ -225,6 +225,7 @@ const LP_MANAGERS = new Set([
   '0xeC8E5342B19977B4eF8892e02D8DAEcfa1315831', // Slipstream Pool Factory
   '0xbe6d8f0d05cc4be24d5167a3ef062215be6d18a5', // Slipstream Swap Router
   '0xcf77a3ba9a5ca399b7c97c74d54e5b1beb874e43', // Aerodrome Router (V2)
+  '0x82321f3beb69f503380d6b233857d5c43562e2d0', // CL200-WETH/AERO Pool
   // ─ Velodrome (Optimism — Aerodrome fork) ─
   '0x416b433906b1b72fa758e166e239c43d68dc6f29', // Slipstream NFT PM (Velodrome)
   '0xa062ae8a9c5e11aaa026fc2670b0d65ccc8b2858', // Slipstream NFT PM (alt)
@@ -411,6 +412,36 @@ async function rpcCall(chain, method, params) {
   const d = await res.json();
   if (d.error) throw new Error(d.error.message);
   return d.result;
+}
+
+// 동적 LP pair 감지: token0()/token1() 가능하면 LP로 간주 (캐시)
+// state.lpAddresses는 set, state.notLpCache는 한 번 검사한 비-LP 주소
+state.notLpCache = state.notLpCache || new Set();
+
+async function isLPPair(chain, addr) {
+  const lo = addr.toLowerCase();
+  if (state.lpAddresses.has(lo)) return true;
+  if (state.notLpCache.has(lo)) return false;
+  if (LP_MANAGERS.has(lo)) { state.lpAddresses.add(lo); return true; }
+  // EOA 가능성 체크 — eth_getCode → '0x'면 EOA
+  try {
+    const code = await rpcCall(chain, 'eth_getCode', [addr, 'latest']);
+    if (!code || code === '0x' || code.length < 4) {
+      state.notLpCache.add(lo);
+      return false;
+    }
+    // token0() 호출 시도 — selector 0x0dfe1681
+    const t0 = await rpcCall(chain, 'eth_call', [{ to: addr, data: '0x0dfe1681' }, 'latest']);
+    if (t0 && t0 !== '0x' && t0.length >= 66) {
+      state.lpAddresses.add(lo);
+      return true;
+    }
+    state.notLpCache.add(lo);
+    return false;
+  } catch (e) {
+    state.notLpCache.add(lo);
+    return false;
+  }
 }
 
 async function getTokenMeta(chain, ca) {
@@ -673,6 +704,13 @@ async function handleLog(chain, log_, source) {
     if (!price) return;
     const usd = amt * price;
     if (usd < MIN_USD) return;
+
+    // ── 동적 LP pair 감지 (100K+ 통과한 후 검사 — 비용 적음) ──
+    // from/to가 LP pair이면 drop + 다음부터는 빠른 정적 거름
+    const fromIsLP = await isLPPair(chain, from);
+    if (fromIsLP) return;
+    const toIsLP = await isLPPair(chain, to);
+    if (toIsLP) return;
 
     // 발행량 %
     const supplyPct = meta.totalSupply > 0 ? (amt / meta.totalSupply * 100) : 0;
