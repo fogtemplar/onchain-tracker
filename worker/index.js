@@ -466,36 +466,55 @@ async function getTokenMeta(chain, ca) {
 }
 
 // ── Price ──
-async function getPrice(symbol, ca) {
-  const key = symbol.toUpperCase();
-  const cached = state.priceCache.get(key);
-  if (cached && Date.now() - cached.ts < 5 * 60 * 1000) return cached.price;
-  // Binance
-  try {
-    const r = await fetch(`https://api.binance.com/api/v3/ticker/price?symbol=${key}USDT`);
-    if (r.ok) {
-      const d = await r.json();
-      const p = parseFloat(d.price);
-      if (p > 0) {
-        state.priceCache.set(key, { price: p, ts: Date.now() });
-        return p;
+// CA 우선 캐시 — 동명이형 토큰 (e.g. BSC TOSHI vs Base TOSHI) 가격 충돌 방지
+async function getPrice(symbol, ca, chain) {
+  const caLo = (ca || '').toLowerCase();
+  // CA 단위 캐시 (정확)
+  if (caLo) {
+    const cached = state.priceCache.get(caLo);
+    if (cached && Date.now() - cached.ts < 5 * 60 * 1000) return cached.price;
+  }
+
+  // 1. DexScreener — CA 직접 조회 (가장 정확, 같은 CA의 풀에서만 가격 가져옴)
+  if (caLo) {
+    try {
+      const r = await fetch(`https://api.dexscreener.com/latest/dex/tokens/${caLo}`);
+      if (r.ok) {
+        const d = await r.json();
+        const valid = (d.pairs || []).filter(p => p.priceUsd && parseFloat(p.priceUsd) > 0);
+        if (valid.length) {
+          // 유동성 가장 큰 풀
+          valid.sort((a, b) => (b.liquidity?.usd || 0) - (a.liquidity?.usd || 0));
+          const best = valid[0];
+          const p = parseFloat(best.priceUsd);
+          // sanity check — 유동성 너무 낮으면 가격 신뢰 안 함
+          const liq = best.liquidity?.usd || 0;
+          if (p > 0 && liq >= 5000) {
+            state.priceCache.set(caLo, { price: p, ts: Date.now() });
+            return p;
+          }
+        }
       }
-    }
-  } catch (e) {}
-  // DexScreener
-  try {
-    const r = await fetch(`https://api.dexscreener.com/latest/dex/tokens/${ca}`);
-    if (r.ok) {
-      const d = await r.json();
-      const valid = (d.pairs || []).filter(p => p.priceUsd && parseFloat(p.priceUsd) > 0);
-      if (valid.length) {
-        valid.sort((a, b) => (b.liquidity?.usd || 0) - (a.liquidity?.usd || 0));
-        const p = parseFloat(valid[0].priceUsd);
-        state.priceCache.set(key, { price: p, ts: Date.now() });
-        return p;
+    } catch (e) {}
+  }
+
+  // 2. Binance — 심볼 매칭 (마지막 폴백)
+  // 주의: 동명이형 가능 → CA로 못 찾았을 때만 사용
+  const key = (symbol || '').toUpperCase();
+  if (key) {
+    try {
+      const r = await fetch(`https://api.binance.com/api/v3/ticker/price?symbol=${key}USDT`);
+      if (r.ok) {
+        const d = await r.json();
+        const p = parseFloat(d.price);
+        if (p > 0) {
+          // CA 캐시에도 저장 (동명 충돌 방지를 위해 CA 단위)
+          if (caLo) state.priceCache.set(caLo, { price: p, ts: Date.now() });
+          return p;
+        }
       }
-    }
-  } catch (e) {}
+    } catch (e) {}
+  }
   return 0;
 }
 
@@ -700,7 +719,7 @@ async function handleLog(chain, log_, source) {
     if (amt <= 0) return;
 
     // 가격
-    const price = await getPrice(meta.symbol, ca);
+    const price = await getPrice(meta.symbol, ca, chain);
     if (!price) return;
     const usd = amt * price;
     if (usd < MIN_USD) return;
