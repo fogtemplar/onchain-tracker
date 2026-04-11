@@ -6210,12 +6210,103 @@ async function openSignalDetail(key, chain){
           '<td style="padding:8px 12px;">'+(f.hash?'<a href="'+exp+'/tx/'+f.hash+'" target="_blank" style="color:var(--cyan);font-size:11px;">↗</a>':'—')+'</td>'+
         '</tr>';
       }).join('')+'</tbody></table></div>'+
+    '<div id="walletHistorySection" style="margin-bottom:12px;">'+
+      '<div style="font-size:11px;color:var(--purple);text-transform:uppercase;letter-spacing:.06em;font-weight:700;margin-bottom:8px;display:flex;align-items:center;gap:8px;">'+
+        '👛 수신 지갑별 최근 입출금 (5건)'+
+        '<span style="font-size:10px;color:var(--text3);font-weight:400;text-transform:none;">— Etherscan tokentx 자동 조회</span>'+
+      '</div>'+
+      '<div id="walletHistoryBody" style="font-size:11px;color:var(--text3);">로딩 중...</div>'+
+    '</div>'+
     '<div style="display:flex;gap:8px;flex-wrap:wrap;">'+
       (data.ca?'<button onclick="addWatchClusterFromSignal(\''+key+'\',\''+chain+'\')" style="padding:9px 16px;background:rgba(163,113,247,.1);border:1.5px solid rgba(163,113,247,.5);color:var(--purple);font-family:var(--mono);font-size:13px;cursor:pointer;border-radius:6px;">👁 5분 감시 등록</button>':'')+
       (data.ca?'<button onclick="runFullSmtAnalysis(\''+data.ca+'\',\''+chain+'\')" style="padding:9px 16px;background:rgba(0,180,216,.1);border:1.5px solid var(--cyan);color:var(--cyan);font-family:var(--mono);font-size:13px;cursor:pointer;border-radius:6px;">📤 출금추적</button>':'')+
       '<button onclick="runAISignal(\''+key+'\',\''+chain+'\')" style="padding:9px 16px;background:rgba(210,153,34,.08);border:1.5px solid rgba(210,153,34,.3);color:var(--warn);font-family:var(--mono);font-size:13px;cursor:pointer;border-radius:6px;">🤖 AI 분석</button>'+
       '<button onclick="stage4_startMonitor(signalScores[\''+key+'\'],1);showToast(\'✓ 1분 감시\',\''+data.sym+' 1분 폴링 시작\',false)" style="padding:9px 16px;background:rgba(63,185,80,.08);border:1.5px solid rgba(63,185,80,.3);color:var(--bull);font-family:var(--mono);font-size:13px;cursor:pointer;border-radius:6px;">🔴 1분 감시</button>'+
     '</div>';
+
+  // 수신 지갑별 입출금 자동 fetch
+  if(data.ca && data.flows && data.flows.length){
+    loadWalletHistories(data, chain);
+  } else {
+    var bodyEl=document.getElementById('walletHistoryBody');
+    if(bodyEl) bodyEl.innerHTML='<span style="color:var(--text3);">데이터 없음</span>';
+  }
+}
+
+// 수신 지갑별 해당 토큰 최근 5건 입출금 자동 조회
+async function loadWalletHistories(data, chain){
+  var body=document.getElementById('walletHistoryBody');
+  if(!body) return;
+  if(!getEthKey()){ body.innerHTML='<span style="color:var(--bear);">Etherscan API 키 필요</span>'; return; }
+
+  // unique 수신 지갑 추출 (최대 10개)
+  var uniqueAddrs=[];
+  var seen={};
+  data.flows.forEach(function(f){
+    var to=(f.to||'').toLowerCase();
+    if(!to||seen[to]||EX_MAP[to]) return;
+    seen[to]=true;
+    uniqueAddrs.push({addr:to, ex:f.ex, amt:f.amt, ts:f.ts});
+    if(uniqueAddrs.length>=10) return;
+  });
+  uniqueAddrs=uniqueAddrs.slice(0,10);
+
+  if(!uniqueAddrs.length){ body.innerHTML='<span style="color:var(--text3);">개인 지갑 없음</span>'; return; }
+
+  body.innerHTML='<div style="color:var(--cyan);font-size:11px;">'+uniqueAddrs.length+'개 지갑 조회 중...</div>';
+
+  var exp=CHAIN_EXP[chain]||'https://etherscan.io';
+  var msId=CHAIN_ID[chain]||1;
+  var sections=[];
+
+  for(var i=0;i<uniqueAddrs.length;i++){
+    var w=uniqueAddrs[i];
+    var txs=await ethScan(chain,{
+      module:'account', action:'tokentx',
+      address:w.addr, contractaddress:data.ca,
+      page:1, offset:5, sort:'desc'
+    });
+
+    var rows='';
+    if(txs && Array.isArray(txs) && txs.length){
+      var dec2=parseInt((txs[0].tokenDecimal)||'18')||18;
+      rows=txs.map(function(tx){
+        var amt=0;
+        try{amt=Number(BigInt(tx.value||'0'))/Math.pow(10,dec2);}catch(e){}
+        var isIn=(tx.to||'').toLowerCase()===w.addr;
+        var partner=isIn?(tx.from||''):(tx.to||'');
+        var partnerLo=partner.toLowerCase();
+        var partnerLabel=EX_MAP[partnerLo]?'🏦 '+EX_MAP[partnerLo]:(KNOWN_LP[partnerLo]?'🔁 LP':'👤 '+partner.slice(0,8)+'...');
+        var ts=parseInt(tx.timeStamp||'0')*1000;
+        var dirIcon=isIn?'<span style="color:var(--bull);font-weight:700;">▲</span>':'<span style="color:var(--bear);font-weight:700;">▼</span>';
+        var dirColor=isIn?'var(--bull)':'var(--bear)';
+        return '<tr style="border-bottom:1px solid var(--bd);">'+
+          '<td style="padding:5px 10px;font-size:11px;color:var(--text3);white-space:nowrap;">'+new Date(ts).toLocaleString('ko',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'})+'</td>'+
+          '<td style="padding:5px 10px;text-align:center;">'+dirIcon+'</td>'+
+          '<td style="padding:5px 10px;font-size:11px;color:'+dirColor+';font-weight:600;">'+(isIn?'+':'-')+fN(amt)+'</td>'+
+          '<td style="padding:5px 10px;font-size:11px;color:var(--text2);">'+partnerLabel+'</td>'+
+          '<td style="padding:5px 10px;"><a href="'+exp+'/tx/'+tx.hash+'" target="_blank" style="color:var(--cyan);font-size:10px;">↗</a></td>'+
+        '</tr>';
+      }).join('');
+    } else {
+      rows='<tr><td colspan="5" style="padding:8px;color:var(--text3);font-size:11px;text-align:center;">최근 거래 없음</td></tr>';
+    }
+
+    sections.push(
+      '<div style="background:var(--bg3);border:1px solid var(--bd);border-radius:6px;margin-bottom:8px;overflow:hidden;">'+
+        '<div style="padding:8px 12px;background:var(--bg4);border-bottom:1px solid var(--bd);display:flex;align-items:center;gap:8px;flex-wrap:wrap;">'+
+          '<span style="font-size:11px;color:var(--text3);">#'+(i+1)+'</span>'+
+          '<a href="'+exp+'/address/'+w.addr+'" target="_blank" style="font-size:11px;color:var(--cyan);text-decoration:none;font-family:var(--mono);">'+w.addr+'</a>'+
+          '<span style="font-size:10px;padding:2px 6px;background:rgba(210,153,34,.1);border:1px solid rgba(210,153,34,.25);color:var(--warn);border-radius:3px;">'+w.ex+'에서 수신</span>'+
+          '<a href="https://app.metasleuth.io/?chainId='+msId+'&address='+w.addr+'" target="_blank" style="font-size:10px;color:var(--gold);margin-left:auto;">MetaSleuth ↗</a>'+
+        '</div>'+
+        '<table style="width:100%;border-collapse:collapse;">'+rows+'</table>'+
+      '</div>'
+    );
+
+    body.innerHTML=sections.join('')+(i<uniqueAddrs.length-1?'<div style="color:var(--text3);font-size:11px;">조회 중... '+(i+1)+'/'+uniqueAddrs.length+'</div>':'');
+    await sleep(250); // Etherscan rate limit
+  }
 }
 
 function addWatchClusterFromSignal(key, chain){
