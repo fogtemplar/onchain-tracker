@@ -634,7 +634,6 @@ a:visited{color:#800080 !important;}
   <button class="nav-btn on" id="nv-signal" onclick="dashNav('signal')"><span class="ico">⚡</span>시그널 랭킹</button>
   <button class="nav-btn" id="nv-analyze" onclick="dashNav('analyze')"><span class="ico">🔬</span>토큰 분석</button>
   <button class="nav-btn" id="nv-whale" onclick="dashNav('whale')"><span class="ico">🐋</span>100K+ 전송<span class="badge" id="nbWhaleCount">0</span></button>
-  <button class="nav-btn" id="nv-analytics" onclick="dashNav('analytics')"><span class="ico">📊</span>분석 대시보드<span class="badge" id="nbAnomCount">0</span></button>
   <button class="nav-btn" id="nv-exclude" onclick="dashNav('exclude')"><span class="ico">🚫</span>제외 리스트<span class="badge" id="nbExCount">—</span></button>
 
   <div class="nav-sec" style="margin-top:8px;">파이프라인 통계</div>
@@ -889,6 +888,10 @@ function dashNav(t){
     if(bar)bar.style.display='none';
     document.body.removeAttribute('data-mode');
     switchTab(t);
+  }
+  // whale 진입 시 anomaly 배지만 백그라운드 로드
+  if(t==='whale' && typeof analyticsLoadAnomalies==='function'){
+    analyticsLoadAnomalies();
   }
 }
 
@@ -1630,6 +1633,14 @@ window.addEventListener('DOMContentLoaded', function(){
 
 <!-- ═══ WHALE 100K+ TRANSFER PANE ═══ -->
 <div class="pane" id="pane-whale">
+  <!-- 서브탭 바 -->
+  <div style="background:#000080;padding:6px 16px;display:flex;gap:0;border-bottom:1px solid #000;">
+    <button class="whale-sub on" id="wsubTab-live" onclick="whaleSubTab('live')">📺 실시간</button>
+    <button class="whale-sub" id="wsubTab-analytics" onclick="whaleSubTab('analytics')">📊 분석<span id="wsubAnomBadge" style="margin-left:6px;background:#fff;color:#000080;padding:1px 6px;font-size:10px;font-weight:bold;border:1px solid #fff;">0</span></button>
+  </div>
+
+  <!-- ═ 실시간 서브탭 ═ -->
+  <div id="wsub-live">
   <div style="padding:14px 20px;background:#c0c0c0;border-bottom:1px solid #808080;">
     <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:10px;">
       <div style="font-size:14px;font-weight:bold;color:#000;">🐋 100K+ 전송 상시 트래킹</div>
@@ -1699,13 +1710,14 @@ window.addEventListener('DOMContentLoaded', function(){
       </tbody>
     </table>
   </div>
-</div>
+  </div>
+  <!-- ═ /실시간 서브탭 ═ -->
 
-<!-- ═══ ANALYTICS PANE ═══ -->
-<div class="pane" id="pane-analytics">
+  <!-- ═ 분석 서브탭 ═ -->
+  <div id="wsub-analytics" style="display:none;">
   <div style="padding:14px 20px;background:#c0c0c0;border-bottom:1px solid #808080;">
     <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
-      <div style="font-size:14px;font-weight:bold;color:#000;">📊 100K+ 분석 대시보드</div>
+      <div style="font-size:14px;font-weight:bold;color:#000;">📊 분석 (Railway DB 기반)</div>
       <span id="analyticsStatus" style="font-size:11px;color:#404040;">대기 중</span>
       <div style="margin-left:auto;display:flex;gap:6px;align-items:center;">
         <label style="font-size:11px;color:#000;display:flex;align-items:center;gap:4px;">
@@ -1761,9 +1773,12 @@ window.addEventListener('DOMContentLoaded', function(){
       </table>
     </div>
   </div>
+  <!-- ═ /분석 서브탭 ═ -->
 </div>
 
 <style>
+.whale-sub{background:#c0c0c0!important;border:none!important;box-shadow:inset -1px -1px 0 #000,inset 1px 1px 0 #fff,inset -2px -2px 0 #808080,inset 2px 2px 0 #dfdfdf!important;padding:6px 16px!important;font-size:12px!important;cursor:pointer;color:#000!important;font-weight:bold!important;margin-right:2px;}
+.whale-sub.on{box-shadow:inset 1px 1px 0 #000,inset -1px -1px 0 #fff,inset 2px 2px 0 #808080,inset -2px -2px 0 #dfdfdf!important;background:#dfdfdf!important;color:#000080!important;}
 .freq-tab{background:#c0c0c0!important;border:none!important;box-shadow:inset -1px -1px 0 #000,inset 1px 1px 0 #fff,inset -2px -2px 0 #808080,inset 2px 2px 0 #dfdfdf!important;padding:4px 14px!important;font-size:11px!important;cursor:pointer;color:#000!important;}
 .freq-tab.on{box-shadow:inset 1px 1px 0 #000,inset -1px -1px 0 #fff,inset 2px 2px 0 #808080,inset -2px -2px 0 #dfdfdf!important;background:#dfdfdf!important;font-weight:bold!important;color:#000080!important;}
 .anom-card{background:#fff;box-shadow:inset 1px 1px 0 #808080,inset -1px -1px 0 #fff;padding:10px 12px;font-size:11px;color:#000;}
@@ -1853,7 +1868,7 @@ async function analyticsLoadAnomalies(){
     if(d.ok){
       ANALYTICS.anomalies = d.data;
       analyticsRenderAnomalies();
-      var nb = document.getElementById('nbAnomCount');
+      var nb = document.getElementById('wsubAnomBadge');
       if(nb) nb.textContent = d.count;
     }
   } catch(e){ console.warn('anomalies err:', e); }
@@ -1898,17 +1913,21 @@ function analyticsAutoStart(){
   }
 }
 
-// dashNav가 analytics 호출 시 자동 로드
-var _origDashNav = window.dashNav;
-window.dashNav = function(t){
-  if(_origDashNav) _origDashNav(t);
+// 100K+ 전송 안의 서브탭 토글
+function whaleSubTab(t){
+  ['live','analytics'].forEach(function(s){
+    var btn = document.getElementById('wsubTab-'+s);
+    var pane = document.getElementById('wsub-'+s);
+    if(btn) btn.className = 'whale-sub'+(s===t?' on':'');
+    if(pane) pane.style.display = (s===t?'block':'none');
+  });
   if(t === 'analytics'){
     analyticsRefresh();
     analyticsAutoStart();
   } else {
     if(ANALYTICS.autoTimer) clearInterval(ANALYTICS.autoTimer);
   }
-};
+}
 document.addEventListener('change', function(e){
   if(e.target?.id === 'analyticsAuto') analyticsAutoStart();
 });
@@ -3240,7 +3259,7 @@ function getPrice(sym) {
 // ════════════════════════════════════════════════════════════
 
 function switchTab(t) {
-  ['h','o','d','w','signal','exclude','whale','analytics','smt-flow','smt-wallet','smt-chart','smt-cluster','smt-alert'].forEach(function(p){
+  ['h','o','d','w','signal','exclude','whale','smt-flow','smt-wallet','smt-chart','smt-cluster','smt-alert'].forEach(function(p){
     var pane=document.getElementById('pane-'+p);
     var tab=document.getElementById('tb-'+p);
     if(pane) pane.className='pane'+(t===p?' on':'');
