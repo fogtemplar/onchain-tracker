@@ -348,7 +348,6 @@ body.dash .tabbar{display:none;}
 body.dash .keys details:not([open]) summary{display:none;}
 body.dash .keys details[open]{position:fixed;top:50px;left:218px;right:308px;z-index:80;background:var(--bg2);border:1px solid var(--bd);border-radius:6px;box-shadow:0 8px 32px rgba(0,0,0,.6);max-height:80vh;overflow-y:auto;}
 body.dash .keys{height:0;overflow:visible;}
-body.dash #unifiedPanel{display:none !important;}
 body.dash #stepIndicators{display:none !important;}
 body.dash .pane{padding-bottom:40px;}
 body.dash .ctrl{padding:12px 20px;}
@@ -1192,23 +1191,6 @@ window.addEventListener('DOMContentLoaded', function(){
   </details>
 </div>
 
-<!-- 호환용 hidden shim (옛 unifiedPanel 참조 방지) -->
-<div style="display:none;">
-  <button id="fullBtn" onclick="runMasterAnalysis()"></button>
-  <button id="fullStopBtn" onclick="stopMasterAnalysis()"></button>
-  <select id="gRefresh"><option value="30" selected>30</option></select>
-  <input id="gThreshold" type="number" value="0.5">
-  <span id="stepIndicators">
-    <span class="step-ind" id="si-h"></span>
-    <span class="step-ind" id="si-o"></span>
-    <span class="step-ind" id="si-d"></span>
-    <span class="step-ind" id="si-w"></span>
-  </span>
-  <div class="prog-bar"><div id="fullFill" class="prog-fill"></div></div>
-  <div id="fullMsg"></div>
-  <div id="gAutoAlert"></div>
-</div>
-
 <!-- TABS -->
 <div class="tabbar">
   <button class="tab on" id="tb-h" onclick="switchTab('h')">🔍 홀더 분석 <span class="tbg" id="hBadge">—</span></button>
@@ -1498,6 +1480,47 @@ window.addEventListener('DOMContentLoaded', function(){
 
 <!-- ═══ SIGNAL RANKING PANE ═══ -->
 <div class="pane" id="pane-signal">
+  <!-- ═══ 통합 CA + 전체 분석 패널 (시그널 랭킹 전용) ═══ -->
+  <div id="unifiedPanel" style="background:var(--bg2);border-bottom:1px solid var(--bd);padding:14px 24px;display:flex;align-items:center;flex-wrap:wrap;gap:12px;">
+    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
+      <button onclick="runMasterAnalysis()" id="fullBtn"
+        style="padding:10px 22px;background:rgba(63,185,80,.1);border:1.5px solid var(--bull);color:var(--bull);font-family:var(--mono);font-size:13px;font-weight:700;cursor:pointer;border-radius:6px;white-space:nowrap;">
+        🚀 전체 분석 (파이프라인)
+      </button>
+      <span style="font-size:12px;color:var(--text2);">CA 없으면 CoinGlass 전체 자동 온보딩</span>
+      <button onclick="stopMasterAnalysis()" id="fullStopBtn" style="display:none;">■ 중지</button>
+      <div style="display:flex;align-items:center;gap:6px;">
+        <span style="font-size:12px;color:var(--text2);font-weight:500;">자동갱신</span>
+        <select class="sel" id="gRefresh" style="width:100px;font-size:11px;">
+          <option value="0">OFF</option>
+          <option value="5">5분</option>
+          <option value="10">10분</option>
+          <option value="30" selected>30분</option>
+          <option value="60">1시간</option>
+        </select>
+      </div>
+      <div style="display:flex;align-items:center;gap:6px;">
+        <span style="font-size:12px;color:var(--text2);font-weight:500;">감시 임계값</span>
+        <input class="inp" id="gThreshold" type="number" value="0.5" min="0.1" max="100" step="0.1" style="width:70px;font-size:12px;">
+        <span style="font-size:12px;color:var(--text2);">% 초과 → 자동감시</span>
+      </div>
+      <div style="display:flex;gap:6px;margin-left:auto;flex-wrap:wrap;" id="stepIndicators">
+        <span class="step-ind" id="si-h">🔍 홀더분석</span>
+        <span style="color:var(--text3);">→</span>
+        <span class="step-ind" id="si-o">🏦 출금추적</span>
+        <span style="color:var(--text3);">→</span>
+        <span class="step-ind" id="si-d">🎯 모니터링</span>
+        <span style="color:var(--text3);">→</span>
+        <span class="step-ind" id="si-w">👁 클러스터</span>
+      </div>
+    </div>
+    <div style="flex:1;min-width:200px;">
+      <div class="prog-bar"><div id="fullFill" class="prog-fill"></div></div>
+      <div id="fullMsg"></div>
+    </div>
+    <div id="gAutoAlert" style="display:none;margin-top:6px;padding:7px 12px;background:rgba(255,170,0,.08);border:1px solid rgba(255,170,0,.25);border-radius:3px;font-size:11px;color:var(--warn);max-height:60px;overflow-y:auto;"></div>
+  </div>
+
   <!-- CoinGlass 자동 스캔 컨트롤 -->
   <div style="padding:14px 0;border-bottom:1px solid var(--bd);margin-bottom:16px;">
     <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px;">
