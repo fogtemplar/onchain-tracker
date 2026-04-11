@@ -236,10 +236,229 @@ tr:last-child td{border-bottom:none;}
 ::-webkit-scrollbar-track{background:var(--bg);}
 ::-webkit-scrollbar-thumb{background:var(--bd2);border-radius:3px;}
 ::-webkit-scrollbar-thumb:hover{background:var(--text3);}
+
+/* ═══ 3열 마스터 레이아웃 ═══ */
+body.dash{padding-left:210px;padding-right:300px;padding-top:46px;}
+.dash-top{position:fixed;top:0;left:0;right:0;height:46px;background:var(--bg2);border-bottom:1px solid var(--bd);display:flex;align-items:center;padding:0 20px;gap:14px;z-index:100;}
+.dash-top h1{font-size:14px;font-weight:700;color:var(--white);letter-spacing:.02em;}
+.dash-top .sub{font-size:11px;color:var(--text3);}
+.dash-top .spacer{flex:1;}
+.dash-top button.dt-btn{padding:6px 14px;background:rgba(63,185,80,.1);border:1px solid var(--bull);color:var(--bull);font-family:var(--mono);font-size:12px;font-weight:700;cursor:pointer;border-radius:4px;}
+.dash-top button.dt-btn:hover{background:rgba(63,185,80,.2);}
+.dash-top button.dt-btn.stop{background:rgba(248,81,73,.1);border-color:var(--bear);color:var(--bear);}
+.dash-top .dt-keys{padding:5px 11px;background:var(--bg3);border:1px solid var(--bd2);color:var(--text2);font-family:var(--mono);font-size:11px;cursor:pointer;border-radius:4px;}
+.dash-top .dt-keys:hover{border-color:var(--cyan);color:var(--cyan);}
+
+.dash-left{position:fixed;top:46px;left:0;bottom:0;width:210px;background:var(--bg2);border-right:1px solid var(--bd);overflow-y:auto;padding:14px 0;z-index:99;}
+.dash-left .nav-sec{padding:10px 16px 6px;font-size:9px;color:var(--text3);text-transform:uppercase;letter-spacing:.12em;font-weight:700;}
+.dash-left .nav-btn{display:flex;align-items:center;gap:10px;padding:10px 18px;width:100%;background:transparent;border:none;border-left:3px solid transparent;color:var(--text2);font-family:var(--mono);font-size:13px;cursor:pointer;text-align:left;transition:all .12s;}
+.dash-left .nav-btn:hover{background:rgba(255,255,255,.03);color:var(--white);}
+.dash-left .nav-btn.on{background:rgba(0,180,216,.08);border-left-color:var(--cyan);color:var(--cyan);font-weight:700;}
+.dash-left .nav-btn .ico{font-size:15px;width:18px;text-align:center;}
+.dash-left .nav-btn .badge{margin-left:auto;font-size:10px;padding:1px 7px;background:var(--bg3);color:var(--text3);border-radius:8px;}
+.dash-left .nav-btn.on .badge{background:rgba(0,180,216,.15);color:var(--cyan);}
+.dash-left .nav-stat{padding:8px 18px;border-top:1px solid var(--bd);margin-top:8px;}
+.dash-left .nav-stat .lbl{font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:.06em;}
+.dash-left .nav-stat .val{font-size:16px;font-weight:700;color:var(--white);font-family:var(--mono);margin-top:2px;}
+
+.dash-right{position:fixed;top:46px;right:0;bottom:0;width:300px;background:var(--bg2);border-left:1px solid var(--bd);overflow-y:auto;padding:14px 0;z-index:99;}
+.dash-right .rs-sec{padding:8px 16px;border-bottom:1px solid var(--bd);}
+.dash-right .rs-sec:last-child{border-bottom:none;}
+.dash-right .rs-title{font-size:9px;color:var(--text3);text-transform:uppercase;letter-spacing:.12em;font-weight:700;margin-bottom:8px;display:flex;align-items:center;gap:6px;}
+.dash-right .rs-prog-bar{height:4px;background:var(--bg3);border-radius:2px;overflow:hidden;margin-top:6px;}
+.dash-right .rs-prog-fill{height:100%;background:linear-gradient(90deg,var(--cyan),var(--bull));border-radius:2px;transition:width .3s;}
+.dash-right .rs-msg{font-size:11px;color:var(--text2);margin-top:4px;line-height:1.5;}
+.dash-right .rs-log{max-height:240px;overflow-y:auto;background:var(--bg);border:1px solid var(--bd);border-radius:4px;padding:6px 9px;font-family:var(--mono);font-size:10px;line-height:1.7;}
+.dash-right .rs-log div{padding:1px 0;}
+
+/* dash 모드에서 기존 요소 숨김/조정 */
+body.dash .hdr{display:none;}
+body.dash .tabbar{display:none;}
+body.dash .keys details:not([open]) summary{display:none;}
+body.dash .keys details[open]{position:fixed;top:50px;left:218px;right:308px;z-index:80;background:var(--bg2);border:1px solid var(--bd);border-radius:6px;box-shadow:0 8px 32px rgba(0,0,0,.6);max-height:80vh;overflow-y:auto;}
+body.dash .keys{height:0;overflow:visible;}
+body.dash #unifiedPanel{display:none;}
+body.dash #stepIndicators{display:none;}
+body.dash .pane{padding-bottom:40px;}
+body.dash .ctrl{padding:12px 20px;}
+body.dash .prog,body.dash .log{display:none !important;}
+
+/* 시그널 카드 가로 배치 */
+body.dash #signalRankList .sig-row{display:grid;grid-template-columns:30px 1fr auto auto auto;gap:14px;align-items:center;padding:11px 18px;border-bottom:1px solid var(--bd);cursor:pointer;}
+body.dash #signalRankList .sig-row:hover{background:rgba(0,180,216,.03);}
+
+/* 모바일/좁은 화면: 기본 모드로 폴백 */
+@media (max-width: 1100px){
+  body.dash{padding-left:0;padding-right:0;padding-top:0;}
+  body.dash .dash-left,body.dash .dash-right,body.dash .dash-top{display:none;}
+  body.dash .hdr{display:flex;}
+  body.dash .tabbar{display:flex;}
+  body.dash .keys{position:static;}
+  body.dash #unifiedPanel{display:flex;}
+}
 </style>
 
 </head>
-<body>
+<body class="dash">
+
+<!-- ═══ 상단 바 (얇게) ═══ -->
+<div class="dash-top">
+  <h1>🔬 온체인 트래커 v4</h1>
+  <span class="sub">Smart Money · CoinGlass · Etherscan Pro · Arkham</span>
+  <div class="spacer"></div>
+  <button class="dt-keys" onclick="document.querySelector('.keys details').open=!document.querySelector('.keys details').open">⚙ API 키</button>
+  <button class="dt-btn" id="dtRunBtn" onclick="runMasterAnalysis()">🚀 전체 분석</button>
+  <button class="dt-btn stop" id="dtStopBtn" onclick="stopMasterAnalysis()" style="display:none;">■ 중지</button>
+  <div style="display:flex;align-items:center;gap:6px;">
+    <span id="dashLiveLbl" style="font-size:11px;color:var(--text2);">대기</span>
+    <div class="dot" id="dashLiveDot"></div>
+  </div>
+</div>
+
+<!-- ═══ 좌측 네비 ═══ -->
+<div class="dash-left">
+  <div class="nav-sec">메인</div>
+  <button class="nav-btn on" id="nv-signal" onclick="dashNav('signal')"><span class="ico">⚡</span>시그널 랭킹</button>
+  <button class="nav-btn" id="nv-h" onclick="dashNav('h')"><span class="ico">📊</span>홀더 분석<span class="badge" id="nbHBadge">—</span></button>
+  <button class="nav-btn" id="nv-o" onclick="dashNav('o')"><span class="ico">📤</span>출금 추적<span class="badge" id="nbOBadge">0</span></button>
+  <button class="nav-btn" id="nv-d" onclick="dashNav('d')"><span class="ico">🎯</span>홀더 모니터링<span class="badge" id="nbDBadge">—</span></button>
+  <button class="nav-btn" id="nv-w" onclick="dashNav('w')"><span class="ico">👁</span>감시·클러스터<span class="badge" id="nbWBadge">—</span></button>
+
+  <div class="nav-sec" style="margin-top:8px;">파이프라인 통계</div>
+  <div class="nav-stat"><div class="lbl">매핑</div><div class="val" id="nsMapped">—</div></div>
+  <div class="nav-stat"><div class="lbl">분석</div><div class="val" id="nsAnalyzed">—</div></div>
+  <div class="nav-stat"><div class="lbl">시그널</div><div class="val" id="nsSignals" style="color:var(--bull);">—</div></div>
+  <div class="nav-stat"><div class="lbl">DB 캐시</div><div class="val" id="nsDB">—</div></div>
+</div>
+
+<!-- ═══ 우측 사이드바 ═══ -->
+<div class="dash-right">
+  <div class="rs-sec">
+    <div class="rs-title">📈 실시간 진행</div>
+    <div class="rs-msg" id="rsProgMsg">대기 중</div>
+    <div class="rs-prog-bar"><div class="rs-prog-fill" id="rsProgFill" style="width:0%"></div></div>
+  </div>
+
+  <div class="rs-sec">
+    <div class="rs-title">⚙ 빠른 설정</div>
+    <div style="display:flex;flex-direction:column;gap:6px;">
+      <label style="font-size:10px;color:var(--text3);">자동갱신</label>
+      <select class="sel" id="gRefresh2" style="font-size:11px;width:100%;" onchange="document.getElementById('gRefresh').value=this.value">
+        <option value="0">OFF</option>
+        <option value="5">5분</option>
+        <option value="10">10분</option>
+        <option value="30" selected>30분</option>
+        <option value="60">1시간</option>
+      </select>
+      <label style="font-size:10px;color:var(--text3);margin-top:4px;">감시 임계값 (%)</label>
+      <input class="inp" id="gThreshold2" type="number" value="0.5" min="0.1" max="100" step="0.1" style="font-size:11px;width:100%;" oninput="document.getElementById('gThreshold').value=this.value">
+    </div>
+  </div>
+
+  <div class="rs-sec">
+    <div class="rs-title">📜 실시간 로그</div>
+    <div class="rs-log" id="rsLog"><div style="color:var(--text3);">파이프라인 시작 대기 중...</div></div>
+  </div>
+
+  <div class="rs-sec">
+    <div class="rs-title">🚨 알림</div>
+    <div id="rsAlerts" style="font-size:11px;color:var(--text3);">알림 없음</div>
+  </div>
+</div>
+
+<script>
+// ═══ Dashboard 활성화 + 동기화 ═══
+function dashNav(t){
+  switchTab(t);
+  document.querySelectorAll('.dash-left .nav-btn').forEach(function(b){b.classList.remove('on');});
+  var btn=document.getElementById('nv-'+t);
+  if(btn)btn.classList.add('on');
+}
+
+// 기존 setProg 후킹 — 우측 사이드바에 미러링
+(function(){
+  var origSetProg = window.setProg;
+  if(typeof origSetProg === 'function'){
+    window.setProg = function(fillId, msgId, pctId, pct, msg, cur, tot){
+      origSetProg.apply(this, arguments);
+      var rf=document.getElementById('rsProgFill');
+      var rm=document.getElementById('rsProgMsg');
+      if(rf) rf.style.width = pct + '%';
+      if(rm) rm.textContent = msg + (tot?' ('+cur+'/'+tot+')':'');
+    };
+  }
+  // setLive 후킹
+  var origSetLive = window.setLive;
+  if(typeof origSetLive === 'function'){
+    window.setLive = function(on, txt){
+      origSetLive.apply(this, arguments);
+      var d=document.getElementById('dashLiveDot');
+      var l=document.getElementById('dashLiveLbl');
+      if(d) d.className='dot'+(on?' on':'');
+      if(l){l.textContent=txt||(on?'실행 중':'대기');l.style.color=on?'var(--bull)':'var(--text3)';}
+      var rb=document.getElementById('dtRunBtn');
+      var sb=document.getElementById('dtStopBtn');
+      if(rb&&sb){rb.style.display=on?'none':'inline-block';sb.style.display=on?'inline-block':'none';}
+    };
+  }
+  // addLog 후킹 — 우측 사이드바 로그
+  var origAddLog = window.addLog;
+  if(typeof origAddLog === 'function'){
+    window.addLog = function(logId, msg, type){
+      origAddLog.apply(this, arguments);
+      var rl=document.getElementById('rsLog');
+      if(!rl) return;
+      var colors={ok:'#3fb950',err:'#f85149',warn:'#d29922',info:'#00b4d8',dim:'#484f58'};
+      var col=colors[type]||colors.dim;
+      var d=document.createElement('div');
+      d.style.color=col;
+      d.textContent=msg.length>60?msg.slice(0,58)+'…':msg;
+      rl.insertBefore(d, rl.firstChild);
+      while(rl.children.length>40) rl.removeChild(rl.lastChild);
+    };
+  }
+  // smtLog 후킹
+  var origSmtLog = window.smtLog;
+  if(typeof origSmtLog === 'function'){
+    window.smtLog = function(msg, t){
+      origSmtLog.apply(this, arguments);
+      var rl=document.getElementById('rsLog');
+      if(!rl) return;
+      var colors={ok:'#3fb950',err:'#f85149',warn:'#d29922',info:'#00b4d8',dim:'#484f58'};
+      var col=colors[t]||colors.dim;
+      var d=document.createElement('div');
+      d.style.color=col;
+      d.textContent=msg.length>60?msg.slice(0,58)+'…':msg;
+      rl.insertBefore(d, rl.firstChild);
+      while(rl.children.length>40) rl.removeChild(rl.lastChild);
+    };
+  }
+})();
+
+// 통계 주기 동기화
+setInterval(function(){
+  if(typeof PIPE === 'undefined') return;
+  var s = PIPE.stats || {};
+  var set=function(id,v){var e=document.getElementById(id);if(e)e.textContent=v||'—';};
+  set('nsMapped', s.mapped);
+  set('nsAnalyzed', s.analyzed);
+  set('nsSignals', s.signals);
+  set('nsDB', Object.keys(PIPE.db||{}).length);
+
+  // 배지 동기화
+  var copy=function(from,to){var f=document.getElementById(from);var t=document.getElementById(to);if(f&&t)t.textContent=f.textContent;};
+  copy('hBadge','nbHBadge');
+  copy('oBadge','nbOBadge');
+  copy('dBadge','nbDBadge');
+  copy('wBadge','nbWBadge');
+}, 1000);
+
+// 초기 시그널 탭으로 시작
+window.addEventListener('DOMContentLoaded', function(){
+  setTimeout(function(){ if(typeof switchTab==='function') switchTab('signal'); }, 100);
+});
+</script>
+
 
 <div class="hdr">
   <div>
