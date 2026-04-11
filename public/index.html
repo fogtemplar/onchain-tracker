@@ -3489,33 +3489,13 @@ function renderHTable() {
         '<button class="lnk" style="background:rgba(0,221,255,.05);cursor:pointer;" onclick="openDetailModal(\''+h.addr+'\','+h.bal+',\''+h.pct.toFixed(3)+'\',\''+h.chain+'\',\''+h.ca+'\')">📋 전체</button>'+
       '</td>'+
       '</tr>'+
-      // 상세 패널 행 (입출금 5건 — 기본 표시)
-      '<tr class="detail-row" id="dr-'+rowId+'" style="display:table-row;">'+
+      // 상세 패널 행 (입출금 5건 — 토글 방식, 기본 숨김)
+      '<tr class="detail-row" id="dr-'+rowId+'" style="display:none;">'+
         '<td colspan="10" style="padding:0;background:var(--bg);">'+
-          '<div id="dc-'+rowId+'" style="padding:10px 18px;font-size:11px;color:var(--text3);">⏳ 로딩 중...</div>'+
+          '<div id="dc-'+rowId+'" style="padding:10px 18px;font-size:11px;color:var(--text3);">🔍 입출금 버튼을 누르세요</div>'+
         '</td>'+
       '</tr>';
   }).join('')||'<tr><td colspan="10" style="text-align:center;padding:12px;color:#182c40">필터 결과 없음</td></tr>';
-
-  // 모든 행의 입출금 5건 자동 로드 (순차, rate limit 보호)
-  autoLoadHolderTxs();
-}
-
-var _autoLoadRunning = false;
-async function autoLoadHolderTxs(){
-  if(_autoLoadRunning) return;
-  _autoLoadRunning = true;
-  try {
-    for(var i=0; i<hFiltered.length; i++){
-      if(!_autoLoadRunning) break;
-      var h = hFiltered[i];
-      var rowId = 'r'+i+h.addr.slice(-4);
-      var cell = document.getElementById('dc-'+rowId);
-      if(!cell || cell.dataset.loaded==='1') continue;
-      await loadHolderTxInline(rowId, h.addr, h.chain, h.ca);
-      await sleep(120);
-    }
-  } finally { _autoLoadRunning = false; }
 }
 
 async function loadHolderTxInline(rowId, addr, chain, ca){
@@ -4530,26 +4510,12 @@ function renderDTable(){
         +'<button class="lnk" style="background:rgba(155,89,182,.08);border-color:rgba(155,89,182,.3);color:var(--purple);cursor:pointer;" onclick="toggleHolderTx(\''+rowId+'\',\''+r.addr+'\',\''+dChainCtx+'\',\''+dCACtx+'\')">🔍 입출금</button>'
         +'<button class="ai-btn" onclick="openAiAnalysis(\''+r.addr+'\',\''+dChainCtx+'\','+r.bal+',\''+r.pct.toFixed(3)+'\',\''+r.type+'\',\''+(r.mainSrc||'')+'\',' +0+','+0+')" style="margin-left:2px;">🤖 AI</button>'
       +'</td></tr>'
-      +'<tr class="detail-row" id="dr-'+rowId+'" style="display:table-row;">'
+      +'<tr class="detail-row" id="dr-'+rowId+'" style="display:none;">'
         +'<td colspan="9" style="padding:0;background:var(--bg);">'
-          +'<div id="dc-'+rowId+'" style="padding:10px 18px;font-size:11px;color:var(--text3);">⏳ 로딩 중...</div>'
+          +'<div id="dc-'+rowId+'" style="padding:10px 18px;font-size:11px;color:var(--text3);">🔍 입출금 버튼을 누르세요</div>'
         +'</td>'
       +'</tr>';
   }).join('')||'<tr><td colspan="9" style="text-align:center;padding:14px;color:#182c40">필터 결과 없음</td></tr>';
-
-  // 모니터링 행도 자동 로드
-  autoLoadMonitorTxs();
-}
-
-async function autoLoadMonitorTxs(){
-  for(var i=0; i<dFiltered.length; i++){
-    var r = dFiltered[i];
-    var rowId = 'dr'+i+r.addr.slice(-4);
-    var cell = document.getElementById('dc-'+rowId);
-    if(!cell || cell.dataset.loaded==='1') continue;
-    await loadHolderTxInline(rowId, r.addr, dChainCtx, dCACtx);
-    await sleep(120);
-  }
 }
 
 </script>
