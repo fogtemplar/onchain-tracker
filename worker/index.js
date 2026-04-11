@@ -5,6 +5,9 @@
 
 import WebSocket, { WebSocketServer } from 'ws';
 import http from 'http';
+import Database from 'better-sqlite3';
+import fs from 'fs';
+import path from 'path';
 
 // ── Config (env or hardcoded fallback) ──
 const ALCHEMY_KEY = process.env.ALCHEMY_KEY || 'TDTn41PcLHD3pGfG1ilgz';
@@ -24,6 +27,83 @@ const CHAINS = {
 };
 
 const TRANSFER_TOPIC = '0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef';
+
+// ── SQLite (Railway Volume /data 또는 로컬 ./data) ──
+const DATA_DIR = process.env.DATA_DIR || (fs.existsSync('/data') ? '/data' : './data');
+try { fs.mkdirSync(DATA_DIR, { recursive: true }); } catch (e) {}
+const DB_PATH = path.join(DATA_DIR, 'whale.db');
+const db = new Database(DB_PATH);
+db.pragma('journal_mode = WAL');
+db.pragma('synchronous = NORMAL');
+db.exec(`
+  CREATE TABLE IF NOT EXISTS txs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts INTEGER NOT NULL,
+    chain TEXT NOT NULL,
+    sym TEXT NOT NULL,
+    ca TEXT NOT NULL,
+    amt REAL NOT NULL,
+    price REAL NOT NULL,
+    usd REAL NOT NULL,
+    supply_pct REAL DEFAULT 0,
+    ex_from TEXT,
+    ex_to TEXT,
+    addr_from TEXT NOT NULL,
+    addr_to TEXT NOT NULL,
+    hash TEXT NOT NULL,
+    UNIQUE(chain, hash, addr_from, addr_to)
+  );
+  CREATE INDEX IF NOT EXISTS idx_ts ON txs(ts DESC);
+  CREATE INDEX IF NOT EXISTS idx_chain_ts ON txs(chain, ts DESC);
+  CREATE INDEX IF NOT EXISTS idx_sym_ts ON txs(sym, ts DESC);
+  CREATE INDEX IF NOT EXISTS idx_usd ON txs(usd DESC);
+`);
+const dbCount = db.prepare('SELECT COUNT(*) AS c FROM txs').get().c;
+console.log(`[DB] SQLite at ${DB_PATH} — ${dbCount} rows`);
+
+// Prepared statements
+const stmtInsert = db.prepare(`
+  INSERT OR IGNORE INTO txs (ts, chain, sym, ca, amt, price, usd, supply_pct, ex_from, ex_to, addr_from, addr_to, hash)
+  VALUES (@ts, @chain, @sym, @ca, @amt, @price, @usd, @supply_pct, @ex_from, @ex_to, @addr_from, @addr_to, @hash)
+`);
+const stmtRecent = db.prepare(`SELECT * FROM txs ORDER BY ts DESC LIMIT ?`);
+const stmtFilter = db.prepare(`
+  SELECT * FROM txs
+  WHERE ts >= @from_ts
+    AND (@chain = '' OR chain = @chain)
+    AND (@sym = '' OR sym = @sym)
+    AND usd >= @min_usd
+  ORDER BY ts DESC
+  LIMIT @lim
+`);
+const stmtStats = db.prepare(`
+  SELECT
+    chain,
+    COUNT(*) AS cnt,
+    SUM(usd) AS total_usd,
+    MAX(usd) AS max_usd
+  FROM txs
+  WHERE ts >= ?
+  GROUP BY chain
+`);
+const stmtTopSyms = db.prepare(`
+  SELECT sym, COUNT(*) AS cnt, SUM(usd) AS total_usd
+  FROM txs
+  WHERE ts >= ?
+  GROUP BY sym
+  ORDER BY total_usd DESC
+  LIMIT ?
+`);
+const stmtPurge = db.prepare(`DELETE FROM txs WHERE ts < ?`);
+
+// 30일 이상 데이터 자동 삭제 (1시간마다)
+setInterval(() => {
+  try {
+    const cutoff = Date.now() - 30 * 86400 * 1000;
+    const r = stmtPurge.run(cutoff);
+    if (r.changes > 0) console.log(`[DB] purged ${r.changes} rows older than 30d`);
+  } catch (e) { console.warn('purge err:', e.message); }
+}, 3600 * 1000);
 
 // ── EXCLUDE list (메이저/스테이블) ──
 const EXCLUDE = new Set([
@@ -361,6 +441,16 @@ async function handleLog(chain, log_) {
     };
     log_msg(`[${chain.toUpperCase()}] ${meta.symbol} $${fN(usd)} ${fromEx}→${to.slice(0, 8)}…`);
 
+    // SQLite 영구 저장
+    try {
+      stmtInsert.run({
+        ts: r.ts, chain: r.chain, sym: r.sym, ca: r.ca,
+        amt: r.amt, price: r.price, usd: r.usd, supply_pct: r.supplyPct || 0,
+        ex_from: r.fromEx || null, ex_to: r.toEx || null,
+        addr_from: r.from, addr_to: r.to, hash: r.hash,
+      });
+    } catch (e) { console.warn('db insert err:', e.message); }
+
     // 메모리 큐 (최근 200건)
     state.recentTxs.unshift(r);
     if (state.recentTxs.length > 200) state.recentTxs = state.recentTxs.slice(0, 200);
@@ -480,6 +570,8 @@ const httpServer = http.createServer((req, res) => {
   if (req.url === '/health' || req.url === '/') {
     res.writeHead(200, { 'Content-Type': 'application/json' });
     const uptime = Math.floor((Date.now() - state.stats.startedAt) / 1000);
+    let dbTotal = 0;
+    try { dbTotal = db.prepare('SELECT COUNT(*) AS c FROM txs').get().c; } catch (e) {}
     res.end(JSON.stringify({
       ok: true,
       uptime_sec: uptime,
@@ -488,6 +580,8 @@ const httpServer = http.createServer((req, res) => {
       errors: state.stats.errors,
       clients: state.clients.size,
       recent_txs: state.recentTxs.length,
+      db_total: dbTotal,
+      db_path: DB_PATH,
       chains: Object.keys(state.ws).map(c => ({ chain: c, connected: state.ws[c]?.readyState === WebSocket.OPEN })),
       cache: { prices: state.priceCache.size, meta: state.metaCache.size, seen: state.seenHashes.size },
       binance_wl: state.binanceWL?.size || 0,
@@ -501,6 +595,51 @@ const httpServer = http.createServer((req, res) => {
     return;
   }
 
+  // /history?hours=24&chain=bsc&sym=PEPE&min_usd=100000&limit=500
+  if (req.url?.startsWith('/history')) {
+    try {
+      const u = new URL(req.url, 'http://x');
+      const hours = parseInt(u.searchParams.get('hours') || '24');
+      const chain = u.searchParams.get('chain') || '';
+      const sym = (u.searchParams.get('sym') || '').toUpperCase();
+      const minUsd = parseFloat(u.searchParams.get('min_usd') || '0');
+      const limit = Math.min(parseInt(u.searchParams.get('limit') || '500'), 5000);
+      const fromTs = hours > 0 ? Date.now() - hours * 3600 * 1000 : 0;
+      const rows = stmtFilter.all({ from_ts: fromTs, chain, sym, min_usd: minUsd, lim: limit });
+      // DB row → JS object 형식으로 변환 (대시보드 호환)
+      const data = rows.map(row => ({
+        ts: row.ts, chain: row.chain, sym: row.sym, ca: row.ca,
+        amt: row.amt, price: row.price, usd: row.usd, supplyPct: row.supply_pct,
+        from: row.addr_from, to: row.addr_to,
+        fromEx: row.ex_from, toEx: row.ex_to, hash: row.hash,
+      }));
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: true, count: data.length, data }));
+    } catch (e) {
+      res.writeHead(500);
+      res.end(JSON.stringify({ ok: false, error: e.message }));
+    }
+    return;
+  }
+
+  // /stats?days=7
+  if (req.url?.startsWith('/stats')) {
+    try {
+      const u = new URL(req.url, 'http://x');
+      const days = parseInt(u.searchParams.get('days') || '7');
+      const fromTs = Date.now() - days * 86400 * 1000;
+      const byChain = stmtStats.all(fromTs);
+      const topSyms = stmtTopSyms.all(fromTs, 20);
+      const total = db.prepare('SELECT COUNT(*) AS c, SUM(usd) AS sum FROM txs WHERE ts >= ?').get(fromTs);
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: true, days, total: total.c, total_usd: total.sum || 0, by_chain: byChain, top_syms: topSyms }));
+    } catch (e) {
+      res.writeHead(500);
+      res.end(JSON.stringify({ ok: false, error: e.message }));
+    }
+    return;
+  }
+
   res.writeHead(404);
   res.end('Not found');
 });
@@ -511,14 +650,26 @@ wss.on('connection', (clientWs, req) => {
   state.clients.add(clientWs);
   log(`📡 client connected (total: ${state.clients.size})`);
 
-  // 초기 데이터: 최근 트랜잭션 일괄 전송
+  // 초기 데이터: DB에서 최근 500건 + 통계
   try {
+    const rows = stmtRecent.all(500);
+    const data = rows.map(row => ({
+      ts: row.ts, chain: row.chain, sym: row.sym, ca: row.ca,
+      amt: row.amt, price: row.price, usd: row.usd, supplyPct: row.supply_pct,
+      from: row.addr_from, to: row.addr_to,
+      fromEx: row.ex_from, toEx: row.ex_to, hash: row.hash,
+    }));
+    const total = db.prepare('SELECT COUNT(*) AS c FROM txs').get().c;
     clientWs.send(JSON.stringify({
       type: 'init',
-      data: state.recentTxs,
-      stats: { detected: state.stats.detected, uptime: Math.floor((Date.now() - state.stats.startedAt)/1000) }
+      data,
+      stats: {
+        detected: state.stats.detected,
+        uptime: Math.floor((Date.now() - state.stats.startedAt)/1000),
+        db_total: total,
+      }
     }));
-  } catch (e) {}
+  } catch (e) { console.warn('init send err:', e.message); }
 
   // ping 30초마다
   const pingTimer = setInterval(() => {

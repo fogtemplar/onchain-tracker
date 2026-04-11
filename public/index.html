@@ -2230,11 +2230,31 @@ function whaleStart(){
   }
 }
 
-// Railway 워커 WebSocket 연결
-function whaleConnectRailway(){
+// Railway 워커 WebSocket 연결 + DB history 로드
+async function whaleConnectRailway(){
   if(WHALE.railwayWs){
     try { WHALE.railwayWs.close(); } catch(e){}
   }
+
+  // 1. DB에서 24시간 이력 미리 로드 (HTTP)
+  try {
+    document.getElementById('whaleStatus').textContent = '📥 DB에서 최근 24h 이력 로드 중...';
+    var httpUrl = RAILWAY_WS_URL.replace(/^wss?:/, RAILWAY_WS_URL.startsWith('wss')?'https:':'http:').replace(/\/ws$/, '/history?hours=24&limit=1000');
+    var hr = await fetch(httpUrl, {signal: AbortSignal.timeout(15000)});
+    if(hr.ok){
+      var hd = await hr.json();
+      if(hd.ok && Array.isArray(hd.data)){
+        WHALE.rows = hd.data.slice();
+        document.getElementById('whaleTotal').textContent = WHALE.rows.length;
+        var nb = document.getElementById('nbWhaleCount');
+        if(nb) nb.textContent = WHALE.rows.length;
+        whaleRender();
+        document.getElementById('whaleStatus').textContent = '✓ DB 이력 '+WHALE.rows.length+'건 로드, WS 연결 중...';
+      }
+    }
+  } catch(e){ console.warn('history fetch err:', e); }
+
+  // 2. WebSocket 연결 (실시간 push)
   var ws;
   try {
     ws = new WebSocket(RAILWAY_WS_URL);
@@ -2254,21 +2274,25 @@ function whaleConnectRailway(){
     try {
       var msg = JSON.parse(ev.data);
       if(msg.type === 'init'){
-        // 초기: 최근 트랜잭션 일괄 로드
-        WHALE.rows = (msg.data||[]).slice();
-        document.getElementById('whaleTotal').textContent = WHALE.rows.length;
-        var nb = document.getElementById('nbWhaleCount');
-        if(nb) nb.textContent = WHALE.rows.length;
-        whaleRender();
+        // 이미 history HTTP로 로드했으면 빈 경우만 처리
+        if(WHALE.rows.length === 0){
+          WHALE.rows = (msg.data||[]).slice();
+          document.getElementById('whaleTotal').textContent = WHALE.rows.length;
+          var nb = document.getElementById('nbWhaleCount');
+          if(nb) nb.textContent = WHALE.rows.length;
+          whaleRender();
+        }
         if(msg.stats){
+          var dbStr = msg.stats.db_total ? ' / DB '+msg.stats.db_total+'건' : '';
           document.getElementById('whaleStatus').textContent =
-            '🟢 Railway 연결 — 워커 가동시간 '+Math.floor(msg.stats.uptime/60)+'분, 누적 '+msg.stats.detected+'건';
+            '🟢 Railway 실시간 — 가동 '+Math.floor(msg.stats.uptime/60)+'분, 누적 '+msg.stats.detected+'건'+dbStr;
         }
       } else if(msg.type === 'tx'){
-        // 신규 트랜잭션
+        // 신규 트랜잭션 (중복 체크)
         var r = msg.data;
+        if(WHALE.rows.find(function(x){return x.hash===r.hash && x.from===r.from && x.to===r.to;})) return;
         WHALE.rows.unshift(r);
-        if(WHALE.rows.length > 500) WHALE.rows = WHALE.rows.slice(0, 500);
+        if(WHALE.rows.length > 1000) WHALE.rows = WHALE.rows.slice(0, 1000);
         document.getElementById('whaleTotal').textContent = WHALE.rows.length;
         var nb2 = document.getElementById('nbWhaleCount');
         if(nb2) nb2.textContent = WHALE.rows.length;
