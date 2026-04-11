@@ -1796,8 +1796,8 @@ async function whaleBuildCAList(){
   }
 }
 
-// 페이지 로드 시 캐시 복원
-setTimeout(function(){
+// 페이지 로드 시 캐시 복원 + 자동 시작
+setTimeout(async function(){
   try {
     var raw = localStorage.getItem('whale_calist_v1');
     if(raw){
@@ -1810,7 +1810,29 @@ setTimeout(function(){
       }
     }
   } catch(e){}
-}, 400);
+
+  // 자동 시작 시퀀스
+  try {
+    // 1. Binance 화이트리스트 보장
+    await whaleEnsureBnb();
+    // 2. CA 매핑이 비어있으면 빌드
+    var totalCA = Object.values(WHALE.caList||{}).reduce(function(s,a){return s+(a||[]).length;},0);
+    if(totalCA === 0){
+      await whaleBuildCAList();
+    }
+    // 3. 'all' 모드로 자동 시작
+    var allRadio = document.querySelector('input[name="whaleMode"][value="all"]');
+    if(allRadio){
+      allRadio.checked = true;
+      WHALE.scanMode = 'all';
+    }
+    if(!WHALE.active){
+      whaleStart();
+    }
+  } catch(e){
+    console.warn('자동 시작 실패:', e);
+  }
+}, 1500);
 
 // Alchemy WebSocket 엔드포인트
 var ALCHEMY_KEY = 'TDTn41PcLHD3pGfG1ilgz'; // 사용자 키
