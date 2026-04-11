@@ -738,6 +738,12 @@ async function handleLog(chain, log_, source) {
     const usd = amt * price;
     if (usd < MIN_USD) return;
 
+    // sanity: 비정상적으로 큰 USD (>$1B) → 가격 오류 의심, drop + 로깅
+    if (usd > 1e9) {
+      console.log(`[SANITY] dropped ${meta.symbol} ${chain} amt=${amt} price=${price} usd=${usd} ca=${ca}`);
+      return;
+    }
+
     // ── 동적 LP pair 감지 (100K+ 통과한 후 검사 — 비용 적음) ──
     // from/to가 LP pair이면 drop + 다음부터는 빠른 정적 거름
     const fromIsLP = await isLPPair(chain, from);
