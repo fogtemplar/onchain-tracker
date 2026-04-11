@@ -1748,6 +1748,7 @@ window.addEventListener('DOMContentLoaded', function(){
         <tr>
           <th>시간</th>
           <th>체인</th>
+          <th>유형</th>
           <th>토큰</th>
           <th style="text-align:right;">수량</th>
           <th style="text-align:right;">공급%</th>
@@ -1759,7 +1760,7 @@ window.addEventListener('DOMContentLoaded', function(){
         </tr>
       </thead>
       <tbody id="whaleBody">
-        <tr><td colspan="10" style="padding:30px;text-align:center;color:#404040;">▶ 시작 버튼을 눌러 실시간 WebSocket 모니터링을 시작하세요</td></tr>
+        <tr><td colspan="11" style="padding:30px;text-align:center;color:#404040;">▶ 시작 버튼을 눌러 실시간 WebSocket 모니터링을 시작하세요</td></tr>
       </tbody>
     </table>
   </div>
@@ -2670,11 +2671,30 @@ async function whalePoll(){
   if(nb) nb.textContent = WHALE.rows.length;
 }
 
+// 트랜잭션 유형 → 색상/레이블 (서버에서 안 오면 클라이언트 폴백)
+function whaleTypeBadge(r){
+  if(r.tx_type){
+    var col = {
+      cex_out:'#000080', cex_in:'#008000', cex_int:'#808000',
+      dex_swap:'#800080', bridge:'#0080a0', lp:'#a05000', p2p:'#404040'
+    }[r.tx_type] || '#404040';
+    var label = r.tx_label || r.tx_type;
+    return '<span style="background:'+col+';color:#fff;padding:1px 6px;font-size:10px;font-weight:bold;white-space:nowrap;">'+label+'</span>'+
+      (r.tx_tag ? '<div style="font-size:9px;color:#404040;margin-top:2px;">'+r.tx_tag+'</div>' : '');
+  }
+  // 폴백: from/to 기반 추론
+  var fEx = r.fromEx, tEx = r.toEx;
+  if(fEx && !tEx) return '<span style="background:#000080;color:#fff;padding:1px 6px;font-size:10px;font-weight:bold;">🏦↗ 출금</span><div style="font-size:9px;color:#404040;margin-top:2px;">'+fEx+'</div>';
+  if(!fEx && tEx) return '<span style="background:#008000;color:#fff;padding:1px 6px;font-size:10px;font-weight:bold;">🏦↙ 입금</span><div style="font-size:9px;color:#404040;margin-top:2px;">'+tEx+'</div>';
+  if(fEx && tEx) return '<span style="background:#808000;color:#fff;padding:1px 6px;font-size:10px;font-weight:bold;">🏦↔ 내부</span>';
+  return '<span style="background:#404040;color:#fff;padding:1px 6px;font-size:10px;font-weight:bold;">👤 개인이체</span>';
+}
+
 function whaleRender(){
   var body = document.getElementById('whaleBody');
   if(!body) return;
   if(!WHALE.rows.length){
-    body.innerHTML = '<tr><td colspan="10" style="padding:30px;text-align:center;color:#404040;">감지된 트랜잭션 없음</td></tr>';
+    body.innerHTML = '<tr><td colspan="11" style="padding:30px;text-align:center;color:#404040;">감지된 트랜잭션 없음</td></tr>';
     return;
   }
   var chainColor = {eth:'#627eea',bsc:'#f0b90b',arb:'#28a0f0',base:'#0052ff',poly:'#8247e5'};
@@ -2687,10 +2707,10 @@ function whaleRender(){
     var pctColor = r.supplyPct >= 1 ? '#800000' : r.supplyPct >= 0.1 ? '#808000' : '#000080';
     var fromLabel = EX_MAP[r.from] ? '🏦 '+EX_MAP[r.from] : '👤 '+r.from.slice(0,6)+'…'+r.from.slice(-4);
     var toLabel = EX_MAP[r.to] ? '🏦 '+EX_MAP[r.to] : '👤 '+r.to.slice(0,6)+'…'+r.to.slice(-4);
-    var exIcon = r.ex==='직접전송' ? '🔄' : '🏦';
     return '<tr>'+
       '<td style="white-space:nowrap;">'+ago+'</td>'+
       '<td><span style="color:'+(chainColor[r.chain]||'#000')+';font-weight:bold;">'+r.chain.toUpperCase()+'</span></td>'+
+      '<td>'+whaleTypeBadge(r)+'</td>'+
       '<td style="font-weight:bold;">'+r.sym+'</td>'+
       '<td style="text-align:right;">'+fN(r.amt)+'</td>'+
       '<td style="text-align:right;color:'+pctColor+';font-weight:bold;">'+pctStr+'</td>'+

@@ -51,20 +51,26 @@ db.exec(`
     addr_from TEXT NOT NULL,
     addr_to TEXT NOT NULL,
     hash TEXT NOT NULL,
+    tx_type TEXT,
+    tx_tag TEXT,
     UNIQUE(chain, hash, addr_from, addr_to)
   );
   CREATE INDEX IF NOT EXISTS idx_ts ON txs(ts DESC);
   CREATE INDEX IF NOT EXISTS idx_chain_ts ON txs(chain, ts DESC);
   CREATE INDEX IF NOT EXISTS idx_sym_ts ON txs(sym, ts DESC);
   CREATE INDEX IF NOT EXISTS idx_usd ON txs(usd DESC);
+  CREATE INDEX IF NOT EXISTS idx_tx_type ON txs(tx_type);
 `);
+// 기존 DB에 컬럼 없으면 추가 (migration)
+try { db.exec('ALTER TABLE txs ADD COLUMN tx_type TEXT'); } catch (e) {}
+try { db.exec('ALTER TABLE txs ADD COLUMN tx_tag TEXT'); } catch (e) {}
 const dbCount = db.prepare('SELECT COUNT(*) AS c FROM txs').get().c;
 console.log(`[DB] SQLite at ${DB_PATH} — ${dbCount} rows`);
 
 // Prepared statements
 const stmtInsert = db.prepare(`
-  INSERT OR IGNORE INTO txs (ts, chain, sym, ca, amt, price, usd, supply_pct, ex_from, ex_to, addr_from, addr_to, hash)
-  VALUES (@ts, @chain, @sym, @ca, @amt, @price, @usd, @supply_pct, @ex_from, @ex_to, @addr_from, @addr_to, @hash)
+  INSERT OR IGNORE INTO txs (ts, chain, sym, ca, amt, price, usd, supply_pct, ex_from, ex_to, addr_from, addr_to, hash, tx_type, tx_tag)
+  VALUES (@ts, @chain, @sym, @ca, @amt, @price, @usd, @supply_pct, @ex_from, @ex_to, @addr_from, @addr_to, @hash, @tx_type, @tx_tag)
 `);
 const stmtRecent = db.prepare(`SELECT * FROM txs ORDER BY ts DESC LIMIT ?`);
 const stmtFilter = db.prepare(`
@@ -199,21 +205,91 @@ for(const ch of Object.keys(EXCHANGES)) {
   }
 }
 
-// ── LP/Position Manager 블랙리스트 (LP add/remove만 제외, swap/bridge는 허용) ──
-// 사용자 요청: CEX↔CEX, Bridge, DEX swap, Aggregator는 잡고 LP add/remove만 거름
-const DEX_BLACKLIST = new Set([
-  // Uniswap V3 NFT Position Manager (LP NFT mint/burn 시 token transfer 발생)
-  '0xc36442b4a4522e871399cd717abdd847ab11fe88', // V3 NFT Position Manager (multi-chain)
-  '0xc36442b4a4522e871399cd717abdd847ab11fe88',
-  // Uniswap V4 Position Manager
-  '0xbd216513d74c8cf14cf4747e6aaa6420ff64ee9e',
-  // PancakeSwap V3 NonfungiblePositionManager
-  '0x46a15b0b27311cedf172ab29e4f4766fbe7f4364',
-  // PancakeSwap MasterChef V3 (LP staking)
-  '0x556b9306565093c855aea9ae92a594704c2cd59e',
-  // SushiSwap V3 NFT Position Manager
-  '0x2214a42d8e2a1d20635c2cb0664422c528b6a432',
+// ── LP Position Manager (제외 대상) ──
+const LP_MANAGERS = new Set([
+  '0xc36442b4a4522e871399cd717abdd847ab11fe88', // Uniswap V3 NFT PM
+  '0xbd216513d74c8cf14cf4747e6aaa6420ff64ee9e', // Uniswap V4 PM
+  '0x46a15b0b27311cedf172ab29e4f4766fbe7f4364', // PancakeSwap V3 PM
+  '0x556b9306565093c855aea9ae92a594704c2cd59e', // PancakeSwap MasterChef V3
+  '0x2214a42d8e2a1d20635c2cb0664422c528b6a432', // SushiSwap V3 PM
 ]);
+const DEX_BLACKLIST = LP_MANAGERS;
+
+// ── DEX 라우터 (스왑 분류용 — 제외 안 함) ──
+const DEX_ROUTERS = new Map([
+  // Uniswap
+  ['0x7a250d5630b4cf539739df2c5dacb4c659f2488d', 'Uniswap V2'],
+  ['0xe592427a0aece92de3edee1f18e0157c05861564', 'Uniswap V3'],
+  ['0x68b3465833fb72a70ecdf485e0e4c7bd8665fc45', 'Uniswap V3'],
+  ['0xef1c6e67703c7bd7107eed8303fbe6ec2554bf6b', 'Uniswap Universal'],
+  ['0x66a9893cc07d91d95644aedd05d03f95e1dba8af', 'Uniswap V4'],
+  // PancakeSwap
+  ['0x10ed43c718714eb63d5aa57b78b54704e256024e', 'PancakeSwap V2'],
+  ['0x13f4ea83d0bd40e75c8222255bc855a974568dd4', 'PancakeSwap V3'],
+  ['0x1a0a18ac4becddbd6389559687d1a73d8927e416', 'PancakeSwap Smart'],
+  // SushiSwap
+  ['0xd9e1ce17f2641f24ae83637ab66a2cca9c378b9f', 'SushiSwap'],
+  ['0x1b02da8cb0d097eb8d57a175b88c7d8b47997506', 'SushiSwap'],
+  // 1inch
+  ['0x1111111254fb6c44bac0bed2854e76f90643097d', '1inch v4'],
+  ['0x1111111254eeb25477b68fb85ed929f73a960582', '1inch v5'],
+  ['0x111111125421ca6dc452d289314280a0f8842a65', '1inch v6'],
+  // 0x
+  ['0xdef1c0ded9bec7f1a1670819833240f027b25eff', '0x'],
+  ['0xdef1abe32c034e558cdd535791643c58a13acc10', '0x v2'],
+  // Paraswap
+  ['0x216b4b4ba9f3e719726886d34a177484278bfcae', 'Paraswap'],
+  ['0xdef171fe48cf0115b1d80b88dc8eab59176fee57', 'Paraswap'],
+  ['0x6a000f20005980200259b80c5102003040001068', 'Paraswap'],
+  // KyberSwap
+  ['0x6131b5fae19ea4f9d964eac0408e4408b66337b5', 'KyberSwap'],
+  // Curve
+  ['0x99a58482bd75cbab83b27ec03ca68ff489b5788f', 'Curve'],
+  ['0xfa9a30350048b2bf66865ee20363067c66f67e58', 'Curve'],
+  // Balancer Vault
+  ['0xba12222222228d8ba445958a75a0704d566bf2c8', 'Balancer'],
+  // ODOS
+  ['0xcf5540fffcdc3d510b18bfca6d2b9987b0772559', 'ODOS'],
+  ['0xa669e7a0d4b3e4fa48af2de86bd4cd7126be4e13', 'ODOS'],
+  // DODO
+  ['0xa356867fdcea8e71aeaf87805808803806231fdc', 'DODO'],
+  // CowSwap
+  ['0x9008d19f58aabd9ed0d60971565aa8510560ab41', 'CowSwap'],
+]);
+
+// ── Bridge contracts ──
+const BRIDGE_CONTRACTS = new Map([
+  ['0x4200000000000000000000000000000000000010', 'Optimism Bridge'],
+  ['0x99c9fc46f92e8a1c0dec1b1747d010903e884be1', 'Optimism Bridge L1'],
+  ['0xa3a7b6f88361f48403514059f1f16c8e78d60eec', 'Arbitrum Bridge L1'],
+  ['0xcee284f754e854890e311e3280b767f80797180d', 'Across'],
+  ['0x8731d54e9d02c286767d56ac03e8037c07e01e98', 'Stargate'],
+  ['0x150f94b44927f078737562f0fcf3c95c01cc2376', 'Stargate ETH'],
+  ['0x40c57923924b5c5c5455c48d93317139addac8fb', 'Wormhole'],
+  ['0xb8901acb165ed027e32754e0ffe830802919727f', 'Wormhole'],
+  ['0x6b7a87899490ece95443e979ca9485cbe7e71522', 'Hop Protocol'],
+  ['0x3e4a3a4796d16c0cd582c382691998f7c06420b6', 'Synapse'],
+]);
+
+// 트랜잭션 유형 분류
+function classifyTxType(from, to, fromEx, toEx) {
+  // 거래소
+  if (fromEx && !toEx) return { type: 'cex_out', label: '🏦↗ 거래소출금', tag: fromEx };
+  if (!fromEx && toEx) return { type: 'cex_in',  label: '🏦↙ 거래소입금', tag: toEx };
+  if (fromEx && toEx)  return { type: 'cex_int', label: '🏦↔ 거래소내부', tag: fromEx+'→'+toEx };
+  // DEX swap
+  const fromDex = DEX_ROUTERS.get(from);
+  const toDex   = DEX_ROUTERS.get(to);
+  if (fromDex || toDex) return { type: 'dex_swap', label: '🔁 DEX스왑', tag: fromDex || toDex };
+  // Bridge
+  const fromBridge = BRIDGE_CONTRACTS.get(from);
+  const toBridge   = BRIDGE_CONTRACTS.get(to);
+  if (fromBridge || toBridge) return { type: 'bridge', label: '🌉 브리지', tag: fromBridge || toBridge };
+  // LP (걸러져서 여기 안 옴)
+  if (LP_MANAGERS.has(from) || LP_MANAGERS.has(to)) return { type: 'lp', label: '💧 LP', tag: 'LP' };
+  // EOA-EOA
+  return { type: 'p2p', label: '👤 개인이체', tag: '' };
+}
 
 // ── State ──
 const state = {
@@ -546,10 +622,16 @@ async function handleLog(chain, log_, source) {
     // 발행량 %
     const supplyPct = meta.totalSupply > 0 ? (amt / meta.totalSupply * 100) : 0;
 
+    // 트랜잭션 유형 분류
+    const txClass = classifyTxType(from, to, fromEx, toEx);
+
     state.stats.detected++;
     const r = {
       chain, sym: meta.symbol, ca, amt, price, usd,
       from, to, fromEx, toEx, hash, supplyPct,
+      tx_type: txClass.type,
+      tx_label: txClass.label,
+      tx_tag: txClass.tag,
       ts: Date.now(),
     };
     log_msg(`[${chain.toUpperCase()}] ${meta.symbol} $${fN(usd)} ${fromEx}→${to.slice(0, 8)}…`);
@@ -561,6 +643,7 @@ async function handleLog(chain, log_, source) {
         amt: r.amt, price: r.price, usd: r.usd, supply_pct: r.supplyPct || 0,
         ex_from: r.fromEx || null, ex_to: r.toEx || null,
         addr_from: r.from, addr_to: r.to, hash: r.hash,
+        tx_type: r.tx_type || null, tx_tag: r.tx_tag || null,
       });
     } catch (e) { console.warn('db insert err:', e.message); }
 
@@ -818,6 +901,7 @@ const httpServer = http.createServer((req, res) => {
         amt: row.amt, price: row.price, usd: row.usd, supplyPct: row.supply_pct,
         from: row.addr_from, to: row.addr_to,
         fromEx: row.ex_from, toEx: row.ex_to, hash: row.hash,
+        tx_type: row.tx_type, tx_tag: row.tx_tag,
       }));
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ ok: true, count: data.length, data }));
@@ -1031,6 +1115,7 @@ wss.on('connection', (clientWs, req) => {
       amt: row.amt, price: row.price, usd: row.usd, supplyPct: row.supply_pct,
       from: row.addr_from, to: row.addr_to,
       fromEx: row.ex_from, toEx: row.ex_to, hash: row.hash,
+      tx_type: row.tx_type, tx_tag: row.tx_tag,
     }));
     const total = db.prepare('SELECT COUNT(*) AS c FROM txs').get().c;
     clientWs.send(JSON.stringify({
