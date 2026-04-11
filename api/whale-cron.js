@@ -198,7 +198,8 @@ async function sendTelegram(text){
   } catch(e){ console.warn('telegram err:', e.message); }
 }
 
-async function pollChain(chain, BNB){
+async function pollChain(chain, BNB, minUsd, debug){
+  const MIN = minUsd || MIN_USD;
   const exchanges = EXCHANGES[chain] || [];
 
   // 모든 거래소 병렬 폴링
@@ -250,7 +251,7 @@ async function pollChain(chain, BNB){
     const price = priceMap[c.sym+'|'+c.ca] || 0;
     if(!price) continue;
     const usd = c.amt * price;
-    if(usd < MIN_USD) continue;
+    if(usd < MIN) continue;
     globalThis.__seenHashes.add(c.dedupeKey);
     results.push({...c, price, usd});
   }
@@ -271,14 +272,22 @@ function formatMessage(r){
 
 export default async function handler(req, res){
   const startTs = Date.now();
+  const debug = req.query?.debug === '1';
+  const minOverride = parseInt(req.query?.min || '0');
+  const effectiveMin = minOverride || MIN_USD;
 
   try {
     const BNB = await fetchBinanceWhitelist();
     const allResults = [];
+    const debugInfo = {chains:{}, candidates:[]};
 
-    // 5체인 병렬 폴링
     const chains = ['bsc','eth','arb','base','poly'];
-    const chainResults = await Promise.all(chains.map(ch => pollChain(ch, BNB)));
+    const chainResults = await Promise.all(chains.map(async ch => {
+      const r = await pollChain(ch, BNB, effectiveMin, debug);
+      debugInfo.chains[ch] = r.length;
+      if(debug) debugInfo.candidates.push(...r.slice(0,5));
+      return r;
+    }));
     chainResults.forEach(rs => rs.forEach(r => allResults.push(r)));
 
     // USD 큰 순 정렬
@@ -303,7 +312,9 @@ export default async function handler(req, res){
       detected: allResults.length,
       sent: toSend.length,
       cache_size: globalThis.__seenHashes.size,
-      bnb_size: BNB.size
+      bnb_size: BNB.size,
+      min_usd: effectiveMin,
+      ...(debug ? {debug: debugInfo} : {})
     });
   } catch(e){
     res.status(500).json({ok:false, error: e.message});
