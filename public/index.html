@@ -749,7 +749,10 @@ function syncUnifiedCA(){
 // 통합 분석 시작 — 서브탭 따라 해당 함수 호출
 function uniRun(){
   var ca=((document.getElementById('uniCA')||{}).value||'').trim();
-  if(!ca||!ca.startsWith('0x')){alert('CA를 입력하세요 (0x...)');return;}
+  if(!/^0x[a-fA-F0-9]{40}$/.test(ca)){
+    alert('❌ CA 형식 오류\n\n입력: '+ca+' (길이 '+ca.length+')\n정상: 0x + 40자리 16진수 = 42자');
+    return;
+  }
   syncUnifiedCA();
   var fnMap={h:'startHolder', o:'startOutflow', d:'startDist', w:'startWatch'};
   var fn=window[fnMap[_curSubTab]];
@@ -2521,9 +2524,26 @@ function startHolder() {
   var selectedChains = ['eth','bsc','arb','poly','base'].filter(function(ch) {
     return document.getElementById('hc-'+ch) && document.getElementById('hc-'+ch).checked;
   });
-  var validChains = selectedChains.filter(function(ch){ return getHolderCA(ch).startsWith('0x'); });
+  // CA 형식 검증: 0x + 40 hex 문자 = 42자
+  var caRegex = /^0x[a-fA-F0-9]{40}$/;
+  var invalidChains = [];
+  var validChains = selectedChains.filter(function(ch){
+    var ca = getHolderCA(ch);
+    if(!ca) return false;
+    if(!caRegex.test(ca)){
+      invalidChains.push({chain:ch, ca:ca, len:ca.length});
+      return false;
+    }
+    return true;
+  });
 
   if(!selectedChains.length) { alert('체인을 하나 이상 선택하세요'); return; }
+  if(invalidChains.length){
+    var msg = invalidChains.map(function(x){return x.chain.toUpperCase()+': '+x.ca+' (길이 '+x.len+', 정상 42)';}).join('\n');
+    alert('❌ CA 형식 오류\n\n'+msg+'\n\n0x + 40자리 16진수 = 42자여야 합니다');
+    addLog('hLog','❌ CA 형식 오류 — '+msg,'err');
+    return;
+  }
   if(!validChains.length) { addLog('hLog','선택한 체인의 CA를 입력하세요','err'); return; }
   // Etherscan Pro로 홀더 분석 — Alchemy 선택사항
 
