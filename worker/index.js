@@ -300,30 +300,31 @@ function formatMessage(r) {
 // ── Log handler ──
 async function handleLog(chain, log_) {
   try {
-    const ca = (log_.address || '').toLowerCase();
+    // 가장 빠른 early exit: from이 거래소가 아니면 즉시 종료 (BSC 초당 수천건 처리)
     const fromTopic = log_.topics[1] || '';
-    const toTopic = log_.topics[2] || '';
     const from = '0x' + fromTopic.slice(-40);
+    const fromEx = EX_LABEL.get(from);
+    if (!fromEx) return;
+
+    const toTopic = log_.topics[2] || '';
     const to = '0x' + toTopic.slice(-40);
-    const hash = log_.transactionHash;
-    const dedup = `${chain}-${hash}-${log_.logIndex}`;
-    if (state.seenHashes.has(dedup)) return;
-    state.seenHashes.add(dedup);
-    if (state.seenHashes.size > 10000) {
-      const arr = Array.from(state.seenHashes);
-      state.seenHashes = new Set(arr.slice(-7000));
-    }
+    const toEx = EX_LABEL.get(to);
+    if (toEx) return; // CEX→CEX 제외
 
     // mint/burn 제외
     if (from === '0x0000000000000000000000000000000000000000') return;
     if (to === '0x0000000000000000000000000000000000000000') return;
     if (to === '0x000000000000000000000000000000000000dead') return;
 
-    const fromEx = EX_LABEL.get(from);
-    const toEx = EX_LABEL.get(to);
-    // 거래소 출금 (from이 거래소, to는 외부)만 잡음
-    if (!fromEx) return;
-    if (toEx) return; // CEX→CEX 제외
+    const ca = (log_.address || '').toLowerCase();
+    const hash = log_.transactionHash;
+    const dedup = `${chain}-${hash}-${log_.logIndex}`;
+    if (state.seenHashes.has(dedup)) return;
+    state.seenHashes.add(dedup);
+    if (state.seenHashes.size > 5000) {
+      const arr = Array.from(state.seenHashes);
+      state.seenHashes = new Set(arr.slice(-3000));
+    }
 
     // 메타데이터
     const meta = await getTokenMeta(chain, ca);
@@ -372,7 +373,7 @@ function connectChain(chain) {
   const ws = new WebSocket(cfg.wss);
   state.ws[chain] = ws;
 
-  // BSC는 array OR 필터 미지원 → 거래소별 개별 구독
+  // BSC는 거래소 OR 필터를 일정 개수 이상이면 거부 → topic0만 구독, 클라이언트에서 from 매칭
   // 다른 체인은 한 번에 array로 가능
   const isBsc = chain === 'bsc';
   const subIds = new Set();
@@ -382,17 +383,14 @@ function connectChain(chain) {
     const exchangeAddrs = EXCHANGES[chain] || [];
 
     if (isBsc) {
-      // 거래소마다 개별 구독 (BSC 호환)
-      exchangeAddrs.forEach((ex, idx) => {
-        ws.send(JSON.stringify({
-          jsonrpc: '2.0',
-          method: 'eth_subscribe',
-          params: ['logs', {
-            topics: [TRANSFER_TOPIC, addrToTopic(ex.addr)]
-          }],
-          id: 1000 + idx,
-        }));
-      });
+      // BSC: 모든 transfer 받고 클라이언트에서 거래소 from 매칭
+      // (BSC 한 블록에 1000+ transfers, 약 초당 ~3000 events)
+      ws.send(JSON.stringify({
+        jsonrpc: '2.0',
+        method: 'eth_subscribe',
+        params: ['logs', { topics: [TRANSFER_TOPIC] }],
+        id: 1,
+      }));
     } else {
       // 일반: 한 번에 array
       const addrTopics = exchangeAddrs.map(e => addrToTopic(e.addr));
