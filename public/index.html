@@ -746,7 +746,7 @@ function syncUnifiedCA(){
   });
 }
 
-// 통합 분석 시작 — 서브탭 따라 해당 함수 호출
+// 통합 분석 시작 — 4개 서브탭 모두 동시 실행
 function uniRun(){
   var ca=((document.getElementById('uniCA')||{}).value||'').trim();
   if(!/^0x[a-fA-F0-9]{40}$/.test(ca)){
@@ -754,9 +754,40 @@ function uniRun(){
     return;
   }
   syncUnifiedCA();
-  var fnMap={h:'startHolder', o:'startOutflow', d:'startDist', w:'startWatch'};
-  var fn=window[fnMap[_curSubTab]];
-  if(typeof fn==='function') fn();
+
+  // 서브탭 4개 모두 백그라운드 실행
+  var ran = [];
+  // 1. 홀더 분석
+  if(typeof startHolder==='function'){
+    try { startHolder(); ran.push('홀더'); } catch(e){ console.warn('startHolder:',e); }
+  }
+  // 2. 홀더 모니터링 (잠깐 텀 두고 — 같은 API rate limit 충돌 방지)
+  setTimeout(function(){
+    if(typeof startDist==='function'){
+      try { startDist(); ran.push('모니터링'); } catch(e){ console.warn('startDist:',e); }
+    }
+  }, 800);
+  // 3. 출금 추적
+  setTimeout(function(){
+    if(typeof startOutflow==='function'){
+      try { startOutflow(); ran.push('출금'); } catch(e){ console.warn('startOutflow:',e); }
+    }
+  }, 1600);
+  // 4. 감시·클러스터 — 입력 주소 필요해서 자동 실행 조건부
+  setTimeout(function(){
+    var wIn = document.getElementById('wInput');
+    if(wIn && wIn.value && /0x[a-fA-F0-9]{40}/.test(wIn.value)){
+      var wCA = document.getElementById('wCA');
+      if(wCA) wCA.value = ca;
+      var wCh = document.getElementById('wChain');
+      if(wCh) wCh.value = ((document.getElementById('uniChain')||{}).value||'bsc');
+      if(typeof startWatch==='function'){
+        try { startWatch(); ran.push('감시'); } catch(e){ console.warn('startWatch:',e); }
+      }
+    }
+  }, 2400);
+
+  showToast && showToast('🔬 통합 분석 시작', '홀더 + 모니터링 + 출금 + 감시 동시 실행', false);
 }
 
 // 기존 setProg 후킹 — 우측 사이드바에 미러링
@@ -1426,15 +1457,38 @@ function getCGKey(){ return (document.getElementById('kCoinGlass')||{}).value||'
 function syncCaFromInput(ca, chain){
   if(!ca) return;
   var lo = ca.trim().toLowerCase();
-  var map = {eth:'caEth',bsc:'caBsc',arb:'caArb',poly:'caPoly',base:'caBase'};
+  // 홀더 분석: 체인별 hidden CA + 메인 hCaBsc
   var hMap = {eth:'hCaEth',bsc:'hCaBsc',arb:'hCaArb',poly:'hCaPoly',base:'hCaBase'};
+  // 모니터링: dCaXxx
   var dMap = {eth:'dCaEth',bsc:'dCaBsc',arb:'dCaArb',poly:'dCaPoly',base:'dCaBase'};
-  [map, hMap, dMap].forEach(function(m){
+  // 출금 추적: caXxx (hidden) + 체인별 oXxxCA
+  var oCaMap = {eth:'caEth',bsc:'caBsc',arb:'caArb',poly:'caPoly',base:'caBase'};
+  var oCaMap2 = {eth:'oEthCA',bsc:'oBscCA',arb:'oArbCA',poly:'oPolyCA',base:'oBaseCA'};
+
+  [hMap, dMap, oCaMap, oCaMap2].forEach(function(m){
     var el = document.getElementById(m[chain]);
     if(el) el.value = lo;
   });
+
+  // 출금 추적 공통 입력칸
   var oTok = document.getElementById('oToken');
-  if(oTok && !oTok.value) oTok.value = lo;
+  if(oTok) oTok.value = lo;
+  var oTokCh = document.getElementById('oTokenChain');
+  if(oTokCh) oTokCh.value = chain;
+
+  // 홀더 분석 체인 체크박스
+  ['eth','bsc','arb','poly','base'].forEach(function(ch){
+    var hcb = document.getElementById('hc-'+ch);
+    if(hcb) hcb.checked = (ch===chain);
+    var ocb = document.getElementById('oc'+ch.charAt(0).toUpperCase()+ch.slice(1));
+    if(ocb) ocb.checked = (ch===chain);
+  });
+
+  // 감시·클러스터
+  var wCA = document.getElementById('wCA');
+  if(wCA) wCA.value = lo;
+  var wCh = document.getElementById('wChain');
+  if(wCh) wCh.value = chain;
 }
 
 function syncMinTok(val){
