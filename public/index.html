@@ -6430,8 +6430,32 @@ async function stage1_collectTickers(maxN){
   PIPE.stage = 'collecting';
   setPipeProgress(2, '[1/4] 티커 수집 중 (CoinGlass + Binance 병렬)...');
   var tickers = [];
-  var EXCLUDE = new Set(['BTC','ETH','BNB','SOL','XRP','ADA','DOGE',
-    'AVAX','DOT','LINK','ATOM','LTC','NEAR','TRX','USDT','USDC','DAI','BUSD']);
+  // ── 메이저·스테이블 제외 리스트 (CoinGecko Top 100 기반) ──
+  var EXCLUDE = new Set([
+    // Top 10 메이저
+    'BTC','WBTC','ETH','WETH','USDT','XRP','BNB','USDC','SOL','TRX','DOGE',
+    // L1 / L2 메이저
+    'ADA','AVAX','TON','HBAR','SUI','BCH','LTC','XLM','DOT','POL','MATIC',
+    'NEAR','ATOM','APT','ALGO','VET','FIL','ICP','XDC','KAS','FLR','ETC',
+    'CRO','MNT','ARB','OP',
+    // 스테이블코인 (전부)
+    'USDT','USDC','DAI','BUSD','TUSD','FDUSD','PYUSD','USDE','LUSD','FRAX',
+    'GUSD','USDP','USDD','CRVUSD','GHO','MIM','EURS','USDS','USD1','USDG',
+    'USDF','USDTB','USTB','USDY','USYC','USD0','RLUSD','BFUSD','YLDS',
+    // RWA / 기관 토큰화
+    'BUIDL','OUSG','JTRSY','EUTBL','BCAP','HASH','FIGR_HELOC','XAUT','PAXG',
+    // CEX 토큰
+    'BNB','LEO','OKB','BGB','HTX','KCS','GT','WBT','CRO','NEXO','HT',
+    // DeFi 블루칩
+    'UNI','AAVE','MKR','COMP','CRV','SUSHI','LDO','SNX','CAKE','RPL','PENDLE',
+    'MORPHO','SKY','JST','ONDO','ENA','JUP',
+    // LST/LRT
+    'STETH','RETH','WSTETH','CBETH','SFRXETH','EZETH','WEETH','RSETH',
+    // 마이너 상위권 (검색·분석 가치 낮음)
+    'TAO','RENDER','FET','HYPE','PI','LINK','QNT','XMR','ZEC','DASH','WLD',
+    'BDX','PUMP','BONK','SHIB','PEPE','TRUMP','M','CC','RAIN','NIGHT','STABLE',
+    'MEMECORE','WLFI','ASTER','SIREN'
+  ]);
 
   // CoinGlass + Binance 병렬 동시 호출 (서로 기다리지 않음)
   var cgPromise = Promise.resolve([]);
