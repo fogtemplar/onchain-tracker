@@ -287,6 +287,17 @@ body.dash .prog,body.dash .log{display:none !important;}
 body.dash #signalRankList .sig-row{display:grid;grid-template-columns:30px 1fr auto auto auto;gap:14px;align-items:center;padding:11px 18px;border-bottom:1px solid var(--bd);cursor:pointer;}
 body.dash #signalRankList .sig-row:hover{background:rgba(0,180,216,.03);}
 
+/* 서브 탭 (토큰 분석 모드) */
+.sub-tab{background:transparent;border:none;border-bottom:2px solid transparent;color:var(--text2);font-family:var(--mono);font-size:12px;padding:10px 16px;cursor:pointer;white-space:nowrap;transition:all .12s;margin-bottom:-1px;}
+.sub-tab:hover{color:var(--white);background:rgba(255,255,255,.02);}
+.sub-tab.on{color:var(--cyan);border-bottom-color:var(--cyan);background:rgba(0,180,216,.04);}
+
+/* 토큰 분석 모드일 때 메인 콘텐츠 위쪽 여백 */
+body.dash #analyzeBar[style*="flex"]~.pane,
+body.dash #analyzeBar[style*="flex"]~div .pane{margin-top:90px;}
+body.dash #pane-h, body.dash #pane-o, body.dash #pane-d, body.dash #pane-w{padding-top:0;}
+body.dash[data-mode="analyze"]{padding-top:136px;}
+
 /* 모바일/좁은 화면: 기본 모드로 폴백 */
 @media (max-width: 1100px){
   body.dash{padding-left:0;padding-right:0;padding-top:0;}
@@ -319,16 +330,42 @@ body.dash #signalRankList .sig-row:hover{background:rgba(0,180,216,.03);}
 <div class="dash-left">
   <div class="nav-sec">메인</div>
   <button class="nav-btn on" id="nv-signal" onclick="dashNav('signal')"><span class="ico">⚡</span>시그널 랭킹</button>
-  <button class="nav-btn" id="nv-h" onclick="dashNav('h')"><span class="ico">📊</span>홀더 분석<span class="badge" id="nbHBadge">—</span></button>
-  <button class="nav-btn" id="nv-o" onclick="dashNav('o')"><span class="ico">📤</span>출금 추적<span class="badge" id="nbOBadge">0</span></button>
-  <button class="nav-btn" id="nv-d" onclick="dashNav('d')"><span class="ico">🎯</span>홀더 모니터링<span class="badge" id="nbDBadge">—</span></button>
-  <button class="nav-btn" id="nv-w" onclick="dashNav('w')"><span class="ico">👁</span>감시·클러스터<span class="badge" id="nbWBadge">—</span></button>
+  <button class="nav-btn" id="nv-analyze" onclick="dashNav('analyze')"><span class="ico">🔬</span>토큰 분석</button>
 
   <div class="nav-sec" style="margin-top:8px;">파이프라인 통계</div>
   <div class="nav-stat"><div class="lbl">매핑</div><div class="val" id="nsMapped">—</div></div>
   <div class="nav-stat"><div class="lbl">분석</div><div class="val" id="nsAnalyzed">—</div></div>
   <div class="nav-stat"><div class="lbl">시그널</div><div class="val" id="nsSignals" style="color:var(--bull);">—</div></div>
   <div class="nav-stat"><div class="lbl">DB 캐시</div><div class="val" id="nsDB">—</div></div>
+
+  <div class="nav-sec" style="margin-top:8px;">활동 배지</div>
+  <div class="nav-stat"><div class="lbl">홀더</div><div class="val" id="nbHBadge2" style="font-size:13px;">—</div></div>
+  <div class="nav-stat"><div class="lbl">출금</div><div class="val" id="nbOBadge2" style="font-size:13px;">0</div></div>
+  <div class="nav-stat"><div class="lbl">모니터</div><div class="val" id="nbDBadge2" style="font-size:13px;">—</div></div>
+  <div class="nav-stat"><div class="lbl">감시</div><div class="val" id="nbWBadge2" style="font-size:13px;">—</div></div>
+</div>
+
+<!-- ═══ 통합 CA 입력 + 서브탭 바 (토큰 분석 모드 전용) ═══ -->
+<div id="analyzeBar" style="display:none;position:fixed;top:46px;left:210px;right:300px;background:var(--bg2);border-bottom:1px solid var(--bd);z-index:60;flex-direction:column;">
+  <div style="display:flex;align-items:center;gap:10px;padding:10px 20px;border-bottom:1px solid var(--bd);">
+    <span style="font-size:11px;color:var(--text3);text-transform:uppercase;letter-spacing:.08em;font-weight:700;">토큰 CA</span>
+    <input class="inp" id="uniCA" placeholder="0x..." style="flex:1;max-width:480px;font-family:var(--mono);font-size:12px;" oninput="syncUnifiedCA()">
+    <select class="sel" id="uniChain" style="font-size:12px;width:90px;" onchange="syncUnifiedCA()">
+      <option value="bsc">BSC</option>
+      <option value="eth">ETH</option>
+      <option value="arb">ARB</option>
+      <option value="base">BASE</option>
+      <option value="poly">POLY</option>
+    </select>
+    <button onclick="uniRun()" style="padding:7px 16px;background:rgba(0,180,216,.1);border:1.5px solid var(--cyan);color:var(--cyan);font-family:var(--mono);font-size:12px;font-weight:700;cursor:pointer;border-radius:4px;">▶ 분석 시작</button>
+    <span style="font-size:10px;color:var(--text3);margin-left:auto;">CA 입력 시 모든 서브탭에 자동 적용</span>
+  </div>
+  <div style="display:flex;gap:0;padding:0 12px;">
+    <button class="sub-tab on" id="st-h" onclick="dashSubTab('h')">📊 홀더 분석</button>
+    <button class="sub-tab" id="st-d" onclick="dashSubTab('d')">📈 모니터링</button>
+    <button class="sub-tab" id="st-o" onclick="dashSubTab('o')">📤 출금 추적</button>
+    <button class="sub-tab" id="st-w" onclick="dashSubTab('w')">👁 감시·클러스터</button>
+  </div>
 </div>
 
 <!-- ═══ 우측 사이드바 ═══ -->
@@ -368,11 +405,53 @@ body.dash #signalRankList .sig-row:hover{background:rgba(0,180,216,.03);}
 
 <script>
 // ═══ Dashboard 활성화 + 동기화 ═══
+var _curSubTab = 'h';
 function dashNav(t){
-  switchTab(t);
   document.querySelectorAll('.dash-left .nav-btn').forEach(function(b){b.classList.remove('on');});
   var btn=document.getElementById('nv-'+t);
   if(btn)btn.classList.add('on');
+
+  var bar=document.getElementById('analyzeBar');
+  if(t==='analyze'){
+    if(bar)bar.style.display='flex';
+    document.body.setAttribute('data-mode','analyze');
+    switchTab(_curSubTab);
+  } else {
+    if(bar)bar.style.display='none';
+    document.body.removeAttribute('data-mode');
+    switchTab(t);
+  }
+}
+
+function dashSubTab(t){
+  _curSubTab = t;
+  document.querySelectorAll('#analyzeBar .sub-tab').forEach(function(b){b.classList.remove('on');});
+  var btn=document.getElementById('st-'+t);
+  if(btn)btn.classList.add('on');
+  switchTab(t);
+}
+
+// 통합 CA 입력 → 모든 분석 탭 CA 동기화
+function syncUnifiedCA(){
+  var ca=((document.getElementById('uniCA')||{}).value||'').trim().toLowerCase();
+  var chain=((document.getElementById('uniChain')||{}).value||'bsc');
+  if(!ca) return;
+  syncCaFromInput(ca, chain);
+  // 체인 체크박스도 동기화 (홀더 분석)
+  ['eth','bsc','arb','poly','base'].forEach(function(ch){
+    var cb=document.getElementById('hc-'+ch);
+    if(cb) cb.checked=(ch===chain);
+  });
+}
+
+// 통합 분석 시작 — 서브탭 따라 해당 함수 호출
+function uniRun(){
+  var ca=((document.getElementById('uniCA')||{}).value||'').trim();
+  if(!ca||!ca.startsWith('0x')){alert('CA를 입력하세요 (0x...)');return;}
+  syncUnifiedCA();
+  var fnMap={h:'startHolder', o:'startOutflow', d:'startDist', w:'startWatch'};
+  var fn=window[fnMap[_curSubTab]];
+  if(typeof fn==='function') fn();
 }
 
 // 기존 setProg 후킹 — 우측 사이드바에 미러링
@@ -447,10 +526,10 @@ setInterval(function(){
 
   // 배지 동기화
   var copy=function(from,to){var f=document.getElementById(from);var t=document.getElementById(to);if(f&&t)t.textContent=f.textContent;};
-  copy('hBadge','nbHBadge');
-  copy('oBadge','nbOBadge');
-  copy('dBadge','nbDBadge');
-  copy('wBadge','nbWBadge');
+  copy('hBadge','nbHBadge2');
+  copy('oBadge','nbOBadge2');
+  copy('dBadge','nbDBadge2');
+  copy('wBadge','nbWBadge2');
 }, 1000);
 
 // 초기 시그널 탭으로 시작
@@ -6602,10 +6681,16 @@ function addWatchClusterFromSignal(key, chain){
 }
 
 function runFullSmtAnalysis(ca,chain){
-  var oTok=document.getElementById('oToken');if(oTok)oTok.value=ca;
-  var oTokCh=document.getElementById('oTokenChain');if(oTokCh)oTokCh.value=chain;
+  // 통합 CA 입력에 채우고 토큰 분석 탭으로 전환
+  var u=document.getElementById('uniCA');if(u)u.value=ca;
+  var uc=document.getElementById('uniChain');if(uc)uc.value=chain;
   syncCaFromInput(ca,chain);
-  switchTab('o');
+  if(typeof dashNav==='function'){
+    dashNav('analyze');
+    dashSubTab('o');
+  } else {
+    switchTab('o');
+  }
 }
 
 function runMasterAnalysis(){
