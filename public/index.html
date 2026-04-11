@@ -633,6 +633,7 @@ a:visited{color:#800080 !important;}
   <div class="nav-sec">메인</div>
   <button class="nav-btn on" id="nv-signal" onclick="dashNav('signal')"><span class="ico">⚡</span>시그널 랭킹</button>
   <button class="nav-btn" id="nv-analyze" onclick="dashNav('analyze')"><span class="ico">🔬</span>토큰 분석</button>
+  <button class="nav-btn" id="nv-whale" onclick="dashNav('whale')"><span class="ico">🐋</span>100K+ 전송<span class="badge" id="nbWhaleCount">0</span></button>
   <button class="nav-btn" id="nv-exclude" onclick="dashNav('exclude')"><span class="ico">🚫</span>제외 리스트<span class="badge" id="nbExCount">—</span></button>
 
   <div class="nav-sec" style="margin-top:8px;">파이프라인 통계</div>
@@ -1637,6 +1638,253 @@ window.addEventListener('DOMContentLoaded', function(){
   <div style="padding:30px;text-align:center;color:#404040;">로딩 중...</div>
 </div>
 
+<!-- ═══ WHALE 100K+ TRANSFER PANE ═══ -->
+<div class="pane" id="pane-whale">
+  <div style="padding:14px 20px;background:#c0c0c0;border-bottom:1px solid #808080;">
+    <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:10px;">
+      <div style="font-size:14px;font-weight:bold;color:#000;">🐋 100K+ 전송 상시 트래킹</div>
+      <span id="whaleStatus" style="font-size:11px;color:#404040;">대기 중</span>
+      <div style="margin-left:auto;display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
+        <label style="font-size:11px;color:#000;">체인:</label>
+        <label style="font-size:11px;"><input type="checkbox" class="whaleChain" value="bsc" checked> BSC</label>
+        <label style="font-size:11px;"><input type="checkbox" class="whaleChain" value="eth" checked> ETH</label>
+        <label style="font-size:11px;"><input type="checkbox" class="whaleChain" value="arb"> ARB</label>
+        <label style="font-size:11px;"><input type="checkbox" class="whaleChain" value="base"> BASE</label>
+        <label style="font-size:11px;"><input type="checkbox" class="whaleChain" value="poly"> POLY</label>
+        <label style="font-size:11px;color:#000;margin-left:8px;">최소 USD:</label>
+        <input id="whaleMinUsd" type="number" value="100000" style="width:90px;font-size:11px;">
+        <label style="font-size:11px;color:#000;margin-left:8px;">간격:</label>
+        <select id="whaleInterval" style="font-size:11px;">
+          <option value="30">30초</option>
+          <option value="60" selected>1분</option>
+          <option value="120">2분</option>
+          <option value="300">5분</option>
+        </select>
+        <button id="whaleStartBtn" onclick="whaleToggle()" style="font-weight:bold;color:#008000;">▶ 시작</button>
+        <button onclick="whaleClear()">🗑 비우기</button>
+      </div>
+    </div>
+    <div id="whaleStats" style="display:flex;gap:14px;font-size:11px;color:#000;">
+      <span>총 감지: <b id="whaleTotal">0</b></span>
+      <span>최근 폴링: <b id="whaleLast">—</b></span>
+      <span>다음 폴링: <b id="whaleNext">—</b></span>
+      <span>스캔된 거래소: <b id="whaleScanned">0</b></span>
+    </div>
+  </div>
+  <div style="overflow-x:auto;">
+    <table id="whaleTbl" style="width:100%;border-collapse:collapse;font-size:11px;">
+      <thead>
+        <tr>
+          <th>시간</th>
+          <th>체인</th>
+          <th>토큰</th>
+          <th style="text-align:right;">수량</th>
+          <th style="text-align:right;">USD</th>
+          <th>거래소</th>
+          <th>수신 지갑</th>
+          <th>위험</th>
+          <th>TX</th>
+        </tr>
+      </thead>
+      <tbody id="whaleBody">
+        <tr><td colspan="9" style="padding:30px;text-align:center;color:#404040;">▶ 시작 버튼을 눌러 폴링을 시작하세요</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<script>
+// ════════════════════════════════════════════════════════════
+// 🐋 100K+ 전송 상시 트래킹 대시보드
+// 거래소 지갑 → 외부 출금을 폴링, EXCLUDE 거른 후 USD 필터링
+// ════════════════════════════════════════════════════════════
+var WHALE = {
+  active: false,
+  timer: null,
+  rows: [],          // 누적 트랜잭션 (최대 200)
+  seenHashes: new Set(),
+  totalScanned: 0,
+  priceCache: {},    // ca → {price, ts}
+  lastPoll: null
+};
+
+function whaleToggle(){
+  if(WHALE.active) whaleStop();
+  else whaleStart();
+}
+
+function whaleStart(){
+  if(!getEthKey()){alert('Etherscan API 키 필요'); return;}
+  WHALE.active = true;
+  document.getElementById('whaleStartBtn').textContent = '⏸ 중지';
+  document.getElementById('whaleStartBtn').style.color = '#800000';
+  document.getElementById('whaleStatus').textContent = '🟢 폴링 중';
+  whalePoll();
+  var interval = parseInt(document.getElementById('whaleInterval').value)*1000;
+  WHALE.timer = setInterval(whalePoll, interval);
+}
+
+function whaleStop(){
+  WHALE.active = false;
+  if(WHALE.timer){clearInterval(WHALE.timer); WHALE.timer=null;}
+  document.getElementById('whaleStartBtn').textContent = '▶ 시작';
+  document.getElementById('whaleStartBtn').style.color = '#008000';
+  document.getElementById('whaleStatus').textContent = '⏸ 중지됨';
+}
+
+function whaleClear(){
+  WHALE.rows = [];
+  WHALE.seenHashes.clear();
+  document.getElementById('whaleTotal').textContent = '0';
+  whaleRender();
+}
+
+async function whaleGetPrice(symbol, ca, chain){
+  // 1. 심볼 기반 (Binance)
+  var p = await getPrice(symbol);
+  if(p > 0) return p;
+  // 2. CA 기반 (DexScreener)
+  return await getPriceByCA(ca, chain);
+}
+
+async function whalePoll(){
+  if(!WHALE.active) return;
+  WHALE.lastPoll = Date.now();
+  document.getElementById('whaleLast').textContent = new Date().toLocaleTimeString('ko');
+
+  var chains = Array.from(document.querySelectorAll('.whaleChain:checked')).map(function(c){return c.value;});
+  var minUsd = parseInt(document.getElementById('whaleMinUsd').value)||100000;
+  if(!chains.length){
+    document.getElementById('whaleStatus').textContent = '⚠ 체인을 선택하세요';
+    return;
+  }
+
+  var EXCL = window.getExcludeSet ? window.getExcludeSet() : new Set();
+  var scanned = 0;
+  var newCount = 0;
+
+  for(var ci=0; ci<chains.length && WHALE.active; ci++){
+    var ch = chains[ci];
+
+    // 해당 체인의 모든 거래소 지갑 수집
+    var exAddrs = [];
+    Object.keys(EXWL).forEach(function(exName){
+      var addrs = EXWL[exName][ch] || [];
+      addrs.forEach(function(addr){ exAddrs.push({name:exName, addr:addr}); });
+    });
+
+    for(var ei=0; ei<exAddrs.length && WHALE.active; ei++){
+      var ex = exAddrs[ei];
+      scanned++;
+      document.getElementById('whaleScanned').textContent = scanned;
+      document.getElementById('whaleStatus').textContent = '🟢 ['+ch.toUpperCase()+'] '+ex.name+' 스캔 중...';
+
+      // 해당 거래소의 최신 토큰 전송 100건
+      var txs = await ethScan(ch, {
+        module:'account', action:'tokentx',
+        address: ex.addr,
+        page:1, offset:100, sort:'desc'
+      });
+      if(!txs || !Array.isArray(txs) || !txs.length) continue;
+
+      for(var ti=0; ti<txs.length; ti++){
+        var tx = txs[ti];
+        if(WHALE.seenHashes.has(tx.hash)) continue;
+
+        var from = (tx.from||'').toLowerCase();
+        var to   = (tx.to||'').toLowerCase();
+        // 거래소 지갑이 from 인 출금만
+        if(from !== ex.addr.toLowerCase()) continue;
+        // 거래소 → 거래소 제외
+        if(EX_MAP[to]) continue;
+
+        var sym = (tx.tokenSymbol||'').toUpperCase();
+        if(!sym) continue;
+        // EXCLUDE 거름
+        if(EXCL.has(sym)) continue;
+
+        var dec = parseInt(tx.tokenDecimal||'18')||18;
+        var amt = 0;
+        try { amt = Number(BigInt(tx.value||'0'))/Math.pow(10, dec); } catch(e){}
+        if(amt <= 0) continue;
+
+        // USD 환산
+        var price = WHALE.priceCache[tx.contractAddress];
+        if(!price || Date.now()-price.ts > 300000){
+          var p = await whaleGetPrice(sym, tx.contractAddress, ch);
+          if(p > 0){
+            WHALE.priceCache[tx.contractAddress] = {price:p, ts:Date.now()};
+            price = WHALE.priceCache[tx.contractAddress];
+          }
+        }
+        var usd = price ? amt * price.price : 0;
+        if(usd < minUsd) continue;
+
+        // 신규 트랜잭션 추가
+        WHALE.seenHashes.add(tx.hash);
+        WHALE.rows.unshift({
+          ts: parseInt(tx.timeStamp||'0')*1000,
+          chain: ch,
+          sym: sym,
+          ca: tx.contractAddress,
+          amt: amt,
+          usd: usd,
+          ex: ex.name,
+          from: from,
+          to: to,
+          hash: tx.hash,
+          risk: usd >= 1000000 ? 'crit' : usd >= 500000 ? 'high' : 'med'
+        });
+        newCount++;
+      }
+
+      // 200건 초과 시 오래된 것 제거
+      if(WHALE.rows.length > 200) WHALE.rows = WHALE.rows.slice(0, 200);
+      await sleep(150); // rate limit 보호
+    }
+  }
+
+  document.getElementById('whaleTotal').textContent = WHALE.rows.length;
+  document.getElementById('whaleStatus').textContent = '🟢 폴링 완료 (신규 '+newCount+'건)';
+
+  // 다음 폴링 시간
+  var interval = parseInt(document.getElementById('whaleInterval').value);
+  document.getElementById('whaleNext').textContent = new Date(Date.now()+interval*1000).toLocaleTimeString('ko');
+
+  whaleRender();
+  // 좌측 네비 배지
+  var nb = document.getElementById('nbWhaleCount');
+  if(nb) nb.textContent = WHALE.rows.length;
+}
+
+function whaleRender(){
+  var body = document.getElementById('whaleBody');
+  if(!body) return;
+  if(!WHALE.rows.length){
+    body.innerHTML = '<tr><td colspan="9" style="padding:30px;text-align:center;color:#404040;">감지된 트랜잭션 없음</td></tr>';
+    return;
+  }
+  var chainColor = {eth:'#627eea',bsc:'#f0b90b',arb:'#28a0f0',base:'#0052ff',poly:'#8247e5'};
+  body.innerHTML = WHALE.rows.map(function(r){
+    var exp = CHAIN_EXP[r.chain]||'';
+    var ago = tAgo(r.ts/1000);
+    var riskColor = r.risk==='crit'?'#800000':r.risk==='high'?'#808000':'#000080';
+    var riskLabel = r.risk==='crit'?'🔴 극심':r.risk==='high'?'🟠 높음':'🟡 주의';
+    return '<tr>'+
+      '<td style="white-space:nowrap;">'+ago+'</td>'+
+      '<td><span style="color:'+(chainColor[r.chain]||'#000')+';font-weight:bold;">'+r.chain.toUpperCase()+'</span></td>'+
+      '<td style="font-weight:bold;">'+r.sym+'</td>'+
+      '<td style="text-align:right;">'+fN(r.amt)+'</td>'+
+      '<td style="text-align:right;font-weight:bold;color:'+riskColor+';">$'+fN(r.usd)+'</td>'+
+      '<td>🏦 '+r.ex+'</td>'+
+      '<td><a href="'+exp+'/address/'+r.to+'" target="_blank" style="font-family:monospace;color:#0000ff;">'+r.to.slice(0,10)+'...'+r.to.slice(-6)+'</a></td>'+
+      '<td><span style="color:'+riskColor+';font-weight:bold;">'+riskLabel+'</span></td>'+
+      '<td><a href="'+exp+'/tx/'+r.hash+'" target="_blank" style="color:#0000ff;">TX↗</a></td>'+
+    '</tr>';
+  }).join('');
+}
+</script>
+
 <script>
 // ════════════════════════════════════════════════════════════
 // CONSTANTS
@@ -2181,7 +2429,7 @@ function getPrice(sym) {
 // ════════════════════════════════════════════════════════════
 
 function switchTab(t) {
-  ['h','o','d','w','signal','exclude','smt-flow','smt-wallet','smt-chart','smt-cluster','smt-alert'].forEach(function(p){
+  ['h','o','d','w','signal','exclude','whale','smt-flow','smt-wallet','smt-chart','smt-cluster','smt-alert'].forEach(function(p){
     var pane=document.getElementById('pane-'+p);
     var tab=document.getElementById('tb-'+p);
     if(pane) pane.className='pane'+(t===p?' on':'');
