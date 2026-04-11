@@ -970,6 +970,7 @@ const httpServer = http.createServer((req, res) => {
       ok: true,
       uptime_sec: uptime,
       mode: SCAN_MODE,
+      min_usd: MIN_USD,
       detected: state.stats.detected,
       sent: state.stats.sent,
       errors: state.stats.errors,
