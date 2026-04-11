@@ -633,6 +633,7 @@ a:visited{color:#800080 !important;}
   <div class="nav-sec">메인</div>
   <button class="nav-btn on" id="nv-signal" onclick="dashNav('signal')"><span class="ico">⚡</span>시그널 랭킹</button>
   <button class="nav-btn" id="nv-analyze" onclick="dashNav('analyze')"><span class="ico">🔬</span>토큰 분석</button>
+  <button class="nav-btn" id="nv-exclude" onclick="dashNav('exclude')"><span class="ico">🚫</span>제외 리스트<span class="badge" id="nbExCount">—</span></button>
 
   <div class="nav-sec" style="margin-top:8px;">파이프라인 통계</div>
   <div class="nav-stat"><div class="lbl">매핑</div><div class="val" id="nsMapped">—</div></div>
@@ -706,6 +707,170 @@ a:visited{color:#800080 !important;}
 </div>
 
 <script>
+// ═══ EXCLUDE 리스트 영구 저장 + 카테고리 관리 ═══
+var EXCLUDE_DEFAULT = {
+  major: ['BTC','WBTC','ETH','WETH','XRP','BNB','SOL','TRX','DOGE','ADA','AVAX',
+          'TON','HBAR','SUI','BCH','LTC','XLM','DOT','POL','MATIC','NEAR','ATOM',
+          'APT','ALGO','VET','FIL','ICP','XDC','KAS','FLR','ETC','CRO','MNT',
+          'ARB','OP','INJ','SEI','STX','TIA','THETA','IOTA','NEO','STRK','ZK','LINK'],
+  stable: ['USDT','USDC','DAI','BUSD','TUSD','FDUSD','PYUSD','USDE','LUSD','FRAX',
+           'GUSD','USDP','USDD','CRVUSD','GHO','MIM','EURS','USDS','USD1','USDG',
+           'USDF','USDTB','USTB','USDY','USYC','USD0','RLUSD','BFUSD','YLDS',
+           'EURC','USX','USDAI','USDA','AUSD','REUSD','NUSD','FDIT','SATUSD'],
+  rwa: ['BUIDL','OUSG','JTRSY','EUTBL','BCAP','HASH','FIGR_HELOC','XAUT','PAXG'],
+  cex: ['LEO','OKB','BGB','HTX','KCS','GT','WBT','NEXO','HT'],
+  defi: ['UNI','AAVE','MKR','COMP','CRV','SUSHI','LDO','SNX','CAKE','RPL','PENDLE',
+         'MORPHO','SKY','ONDO','ENA','JUP','ENS','GRT','PYTH','RAY','HNT'],
+  lst: ['STETH','RETH','WSTETH','CBETH','SFRXETH','EZETH','WEETH','RSETH'],
+  meme: ['TAO','RENDER','FET','HYPE','PI','QNT','XMR','ZEC','DASH','WLD',
+         'PUMP','BONK','SHIB','PEPE','TRUMP','CC','RAIN','NIGHT','STABLE',
+         'MEMECORE','ASTER','FLOKI','WIF','PENGU'],
+  custom: []
+};
+
+var EXCLUDE_LABELS = {
+  major:'🏆 메이저', stable:'💵 스테이블', rwa:'🏛 RWA/기관',
+  cex:'🏦 CEX 토큰', defi:'🔵 DeFi 블루칩', lst:'🪙 LST/LRT',
+  meme:'🔥 마이너/밈', custom:'⭐ 사용자'
+};
+
+function loadExcludeData(){
+  try {
+    var raw = localStorage.getItem('exclude_categories_v1');
+    if(raw) return JSON.parse(raw);
+  } catch(e){}
+  return JSON.parse(JSON.stringify(EXCLUDE_DEFAULT));
+}
+function saveExcludeData(data){
+  try { localStorage.setItem('exclude_categories_v1', JSON.stringify(data)); } catch(e){}
+}
+window.EXCLUDE_DATA = loadExcludeData();
+
+// 전체 심볼 셋 빌드 (시그널 파이프라인이 사용)
+window.getExcludeSet = function(){
+  var s = new Set();
+  Object.keys(window.EXCLUDE_DATA).forEach(function(cat){
+    (window.EXCLUDE_DATA[cat]||[]).forEach(function(sym){ s.add(sym.toUpperCase()); });
+  });
+  return s;
+};
+
+// 추가/삭제 + 즉시 EXCLUDE 갱신
+function excludeAdd(category, symbols){
+  if(!window.EXCLUDE_DATA[category]) window.EXCLUDE_DATA[category]=[];
+  var arr = window.EXCLUDE_DATA[category];
+  symbols.forEach(function(s){
+    var sym = s.trim().toUpperCase();
+    if(sym && arr.indexOf(sym)<0) arr.push(sym);
+  });
+  saveExcludeData(window.EXCLUDE_DATA);
+  if(typeof EXCLUDE !== 'undefined') EXCLUDE = window.getExcludeSet();
+  renderExcludePane();
+}
+function excludeRemove(category, symbol){
+  var arr = window.EXCLUDE_DATA[category]||[];
+  var idx = arr.indexOf(symbol.toUpperCase());
+  if(idx>=0) arr.splice(idx,1);
+  saveExcludeData(window.EXCLUDE_DATA);
+  if(typeof EXCLUDE !== 'undefined') EXCLUDE = window.getExcludeSet();
+  renderExcludePane();
+}
+function excludeReset(){
+  if(!confirm('모든 사용자 변경을 초기화하고 기본값으로 되돌립니다. 계속?')) return;
+  window.EXCLUDE_DATA = JSON.parse(JSON.stringify(EXCLUDE_DEFAULT));
+  saveExcludeData(window.EXCLUDE_DATA);
+  if(typeof EXCLUDE !== 'undefined') EXCLUDE = window.getExcludeSet();
+  renderExcludePane();
+}
+function excludeExport(){
+  var json = JSON.stringify(window.EXCLUDE_DATA, null, 2);
+  navigator.clipboard.writeText(json).then(function(){
+    showToast && showToast('📋 복사됨','EXCLUDE 리스트가 클립보드에 JSON으로 복사됨',false);
+  });
+}
+function excludeImport(){
+  var raw = prompt('JSON 형식으로 붙여넣으세요:');
+  if(!raw) return;
+  try {
+    var d = JSON.parse(raw);
+    window.EXCLUDE_DATA = d;
+    saveExcludeData(d);
+    EXCLUDE = window.getExcludeSet();
+    renderExcludePane();
+    showToast && showToast('✓ 가져오기 완료','',false);
+  } catch(e){ alert('JSON 파싱 실패: '+e.message); }
+}
+
+function renderExcludePane(){
+  var pane = document.getElementById('pane-exclude');
+  if(!pane) return;
+  var data = window.EXCLUDE_DATA;
+  var totalCount = window.getExcludeSet().size;
+
+  // 좌측 네비 배지 갱신
+  var nb = document.getElementById('nbExCount');
+  if(nb) nb.textContent = totalCount;
+
+  var html = '<div style="padding:16px 20px;">'+
+    '<div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;flex-wrap:wrap;">'+
+      '<div style="font-size:16px;font-weight:bold;">🚫 시그널 파이프라인 제외 리스트</div>'+
+      '<span style="padding:3px 10px;background:#000080;color:#fff;font-size:11px;font-weight:bold;">총 '+totalCount+'개</span>'+
+      '<div style="margin-left:auto;display:flex;gap:6px;">'+
+        '<button onclick="excludeExport()">📋 내보내기</button>'+
+        '<button onclick="excludeImport()">📥 가져오기</button>'+
+        '<button onclick="excludeReset()" style="color:#800000;">🔄 초기화</button>'+
+      '</div>'+
+    '</div>'+
+    '<div style="padding:10px 12px;background:#ffffe1;border:1px solid #808080;margin-bottom:14px;font-size:11px;color:#000;">'+
+      '💡 여기 있는 심볼은 시그널 랭킹 자동 온보딩에서 <b>완전히 제외</b>됩니다. 메이저·스테이블·RWA·CEX 토큰을 거르고 알트만 분석하기 위함입니다.<br>'+
+      '변경사항은 브라우저 localStorage에 자동 저장됩니다.'+
+    '</div>';
+
+  // 카테고리별 카드
+  Object.keys(EXCLUDE_LABELS).forEach(function(cat){
+    var label = EXCLUDE_LABELS[cat];
+    var arr = (data[cat]||[]).slice().sort();
+    html += '<div style="background:#c0c0c0;box-shadow:inset -1px -1px 0 #000,inset 1px 1px 0 #fff,inset -2px -2px 0 #808080,inset 2px 2px 0 #dfdfdf;margin-bottom:12px;">'+
+      '<div style="background:#000080;color:#fff;padding:4px 10px;font-size:11px;font-weight:bold;display:flex;align-items:center;gap:8px;">'+
+        '<span>'+label+'</span>'+
+        '<span style="margin-left:auto;font-size:10px;">'+arr.length+'개</span>'+
+      '</div>'+
+      '<div style="padding:8px 10px;">'+
+        '<div style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:8px;">';
+
+    if(arr.length===0){
+      html += '<span style="font-size:11px;color:#404040;">비어있음</span>';
+    } else {
+      arr.forEach(function(sym){
+        html += '<span style="display:inline-flex;align-items:center;gap:4px;background:#fff;padding:2px 4px 2px 8px;font-size:11px;font-family:monospace;box-shadow:inset 1px 1px 0 #808080,inset -1px -1px 0 #fff;">'+
+          sym+
+          '<button onclick="excludeRemove(\''+cat+'\',\''+sym+'\')" style="font-size:9px;padding:0 4px;cursor:pointer;color:#800000;font-weight:bold;" title="제거">×</button>'+
+        '</span>';
+      });
+    }
+
+    html += '</div>'+
+        '<div style="display:flex;gap:4px;border-top:1px solid #808080;padding-top:6px;">'+
+          '<input id="exAdd-'+cat+'" type="text" placeholder="SYMBOL1,SYMBOL2,..." style="flex:1;font-size:11px;" '+
+            'onkeypress="if(event.key===\'Enter\'){var v=this.value;if(v){excludeAdd(\''+cat+'\',v.split(/[,\\s]+/));this.value=\'\';}}">'+
+          '<button onclick="var i=document.getElementById(\'exAdd-'+cat+'\');var v=i.value;if(v){excludeAdd(\''+cat+'\',v.split(/[,\\s]+/));i.value=\'\';}">+ 추가</button>'+
+        '</div>'+
+      '</div>'+
+    '</div>';
+  });
+
+  html += '</div>';
+  pane.innerHTML = html;
+}
+
+// 페이지 로드 시 EXCLUDE 셋 동기화 (전역 EXCLUDE가 없는 경우 대비)
+setTimeout(function(){
+  if(typeof EXCLUDE === 'undefined' || !EXCLUDE.size){
+    window.EXCLUDE = window.getExcludeSet();
+  }
+  renderExcludePane();
+}, 200);
+
 // ═══ Dashboard 활성화 + 동기화 ═══
 var _curSubTab = 'h';
 function dashNav(t){
@@ -1467,6 +1632,11 @@ window.addEventListener('DOMContentLoaded', function(){
   </div>
 </div>
 
+<!-- ═══ EXCLUDE LIST PANE ═══ -->
+<div class="pane" id="pane-exclude">
+  <div style="padding:30px;text-align:center;color:#404040;">로딩 중...</div>
+</div>
+
 <script>
 // ════════════════════════════════════════════════════════════
 // CONSTANTS
@@ -2011,7 +2181,7 @@ function getPrice(sym) {
 // ════════════════════════════════════════════════════════════
 
 function switchTab(t) {
-  ['h','o','d','w','signal','smt-flow','smt-wallet','smt-chart','smt-cluster','smt-alert'].forEach(function(p){
+  ['h','o','d','w','signal','exclude','smt-flow','smt-wallet','smt-chart','smt-cluster','smt-alert'].forEach(function(p){
     var pane=document.getElementById('pane-'+p);
     var tab=document.getElementById('tb-'+p);
     if(pane) pane.className='pane'+(t===p?' on':'');
@@ -6430,40 +6600,8 @@ async function stage1_collectTickers(maxN){
   PIPE.stage = 'collecting';
   setPipeProgress(2, '[1/4] 티커 수집 중 (CoinGlass + Binance 병렬)...');
   var tickers = [];
-  // ── 메이저·스테이블 제외 리스트 (CoinGecko Top 100 기반) ──
-  var EXCLUDE = new Set([
-    // Top 10 메이저
-    'BTC','WBTC','ETH','WETH','USDT','XRP','BNB','USDC','SOL','TRX','DOGE',
-    // L1 / L2 메이저
-    'ADA','AVAX','TON','HBAR','SUI','BCH','LTC','XLM','DOT','POL','MATIC',
-    'NEAR','ATOM','APT','ALGO','VET','FIL','ICP','XDC','KAS','FLR','ETC',
-    'CRO','MNT','ARB','OP',
-    // 스테이블코인 (전부)
-    'USDT','USDC','DAI','BUSD','TUSD','FDUSD','PYUSD','USDE','LUSD','FRAX',
-    'GUSD','USDP','USDD','CRVUSD','GHO','MIM','EURS','USDS','USD1','USDG',
-    'USDF','USDTB','USTB','USDY','USYC','USD0','RLUSD','BFUSD','YLDS',
-    // RWA / 기관 토큰화
-    'BUIDL','OUSG','JTRSY','EUTBL','BCAP','HASH','FIGR_HELOC','XAUT','PAXG',
-    // CEX 토큰
-    'BNB','LEO','OKB','BGB','HTX','KCS','GT','WBT','CRO','NEXO','HT',
-    // DeFi 블루칩
-    'UNI','AAVE','MKR','COMP','CRV','SUSHI','LDO','SNX','CAKE','RPL','PENDLE',
-    'MORPHO','SKY','ONDO','ENA','JUP',
-    // LST/LRT
-    'STETH','RETH','WSTETH','CBETH','SFRXETH','EZETH','WEETH','RSETH',
-    // 마이너 상위권 (검색·분석 가치 낮음)
-    'TAO','RENDER','FET','HYPE','PI','LINK','QNT','XMR','ZEC','DASH','WLD',
-    'PUMP','BONK','SHIB','PEPE','TRUMP','CC','RAIN','NIGHT','STABLE',
-    'MEMECORE','ASTER',
-    // L1/L2 추가
-    'INJ','SEI','STX','TIA','THETA','IOTA','NEO','STRK','ZK',
-    // 인프라/오라클/DeFi 추가
-    'ENS','GRT','PYTH','RAY','HNT',
-    // 밈 추가
-    'FLOKI','WIF','PENGU',
-    // 스테이블 추가
-    'EURC','USX','USDAI','USDA','AUSD','REUSD','NUSD','FDIT','SATUSD'
-  ]);
+  // ── 메이저·스테이블 제외 리스트 (사용자 편집 가능, localStorage 저장) ──
+  var EXCLUDE = window.getExcludeSet ? window.getExcludeSet() : new Set();
 
   // CoinGlass + Binance 병렬 동시 호출 (서로 기다리지 않음)
   var cgPromise = Promise.resolve([]);
