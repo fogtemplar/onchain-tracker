@@ -2975,12 +2975,15 @@ function holderStep3(ca, chain, topN, alchKey, exp, L, latestBlock, dec, sup, sy
 
   async function fetchHolderPages() {
     var page = 1;
-    // Pro Standard: offset 최대 10000. 실패시 1000으로 자동 감소
+    // Pro Standard: offset 최대 10000
     var maxOffset = 10000;
     var emptyCount = 0;
-    while(allHolders.length < Math.max(topN, 500) && !hStopFlag) {
-      setProg('hFill','hMsg','hPct', 5 + Math.min(page*3, 35),
-        'tokenholderlist p'+page+' (수집: '+allHolders.length+'개)...');
+    // 응답이 주소 알파벳순이라 진짜 상위 holder를 찾으려면 여러 페이지를 봐야 함
+    // 최소 5페이지(50000건) 또는 응답 끝까지 수집
+    var maxPages = 10;
+    while(page <= maxPages && !hStopFlag) {
+      setProg('hFill','hMsg','hPct', 5 + Math.min(page*4, 35),
+        'tokenholderlist p'+page+'/'+maxPages+' (수집: '+allHolders.length+'개)...');
       _ethScanLastErr = '';
       var res = await ethScan(chain, {
         module:'token', action:'tokenholderlist',
@@ -2991,6 +2994,7 @@ function holderStep3(ca, chain, topN, alchKey, exp, L, latestBlock, dec, sup, sy
       if(!res && page===1 && maxOffset===10000) {
         L('offset 10000 실패 → 1000으로 재시도','dim');
         maxOffset = 1000;
+        maxPages = 30;
         res = await ethScan(chain, {
           module:'token', action:'tokenholderlist',
           contractaddress:ca, page:1, offset:1000
@@ -3002,7 +3006,6 @@ function holderStep3(ca, chain, topN, alchKey, exp, L, latestBlock, dec, sup, sy
           if(page === 1) {
             L('⚠ tokenholderlist 실패 ('+_ethScanLastErr+')','warn');
             L('  확인: ① Pro Standard 결제 ② API 키 V2 키인지 ③ CA 정확성','warn');
-            L('  테스트 URL: https://api.etherscan.io/v2/api?chainid='+chainId+'&module=token&action=tokenholderlist&contractaddress='+ca+'&page=1&offset=10&apikey='+getEthKey().slice(0,8)+'...','dim');
           }
           break;
         }
@@ -3010,7 +3013,6 @@ function holderStep3(ca, chain, topN, alchKey, exp, L, latestBlock, dec, sup, sy
         continue;
       }
       emptyCount = 0;
-      // V2 응답 필드: TokenHolderAddress, TokenHolderQuantity (raw wei)
       var parsed = res.map(function(h) {
         var addr = (h.TokenHolderAddress||h.tokenHolderAddress||'').toLowerCase();
         var rawQ  = h.TokenHolderQuantity||h.tokenHolderQuantity||'0';
@@ -3023,10 +3025,10 @@ function holderStep3(ca, chain, topN, alchKey, exp, L, latestBlock, dec, sup, sy
         return h.addr && h.addr.length===42 && h.bal > 0 && !BURN_ADDRS[h.addr];
       });
       allHolders = allHolders.concat(parsed);
-      if(page===1||page%5===0) L('  p'+page+': '+res.length+'건 수신 (총 '+allHolders.length+'개)','dim');
+      L('  p'+page+': '+res.length+'건 (누적 '+allHolders.length+'개, top '+(allHolders.slice().sort(function(a,b){return b.bal-a.bal;})[0]||{}).bal+')','dim');
       if(res.length < maxOffset) break; // 마지막 페이지
       page++;
-      await sleep(150); // Pro: 10 calls/sec (100ms 여유)
+      await sleep(150);
     }
     return allHolders;
   }
