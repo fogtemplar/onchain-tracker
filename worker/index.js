@@ -14,8 +14,9 @@ const MIN_USD     = parseInt(process.env.MIN_USD || '100000');
 const PORT        = parseInt(process.env.PORT || '3000');
 
 // ── Chain config ──
+// BSC: Alchemy가 logs 구독 거부 → PublicNode 무료 WebSocket 사용
 const CHAINS = {
-  bsc:  { wss: `wss://bnb-mainnet.g.alchemy.com/v2/${ALCHEMY_KEY}`,     http: `https://bnb-mainnet.g.alchemy.com/v2/${ALCHEMY_KEY}`,     name: 'BSC',  exp: 'https://bscscan.com' },
+  bsc:  { wss: 'wss://bsc-rpc.publicnode.com',                          http: `https://bnb-mainnet.g.alchemy.com/v2/${ALCHEMY_KEY}`,     name: 'BSC',  exp: 'https://bscscan.com' },
   eth:  { wss: `wss://eth-mainnet.g.alchemy.com/v2/${ALCHEMY_KEY}`,     http: `https://eth-mainnet.g.alchemy.com/v2/${ALCHEMY_KEY}`,     name: 'ETH',  exp: 'https://etherscan.io' },
   arb:  { wss: `wss://arb-mainnet.g.alchemy.com/v2/${ALCHEMY_KEY}`,     http: `https://arb-mainnet.g.alchemy.com/v2/${ALCHEMY_KEY}`,     name: 'ARB',  exp: 'https://arbiscan.io' },
   base: { wss: `wss://base-mainnet.g.alchemy.com/v2/${ALCHEMY_KEY}`,    http: `https://base-mainnet.g.alchemy.com/v2/${ALCHEMY_KEY}`,    name: 'BASE', exp: 'https://basescan.org' },
@@ -383,14 +384,17 @@ function connectChain(chain) {
     const exchangeAddrs = EXCHANGES[chain] || [];
 
     if (isBsc) {
-      // BSC: 모든 transfer 받고 클라이언트에서 거래소 from 매칭
-      // (BSC 한 블록에 1000+ transfers, 약 초당 ~3000 events)
-      ws.send(JSON.stringify({
-        jsonrpc: '2.0',
-        method: 'eth_subscribe',
-        params: ['logs', { topics: [TRANSFER_TOPIC] }],
-        id: 1,
-      }));
+      // BSC: PublicNode 사용, 거래소별 개별 구독 (검증된 방식)
+      exchangeAddrs.forEach((ex, idx) => {
+        ws.send(JSON.stringify({
+          jsonrpc: '2.0',
+          method: 'eth_subscribe',
+          params: ['logs', {
+            topics: [TRANSFER_TOPIC, addrToTopic(ex.addr)]
+          }],
+          id: 1000 + idx,
+        }));
+      });
     } else {
       // 일반: 한 번에 array
       const addrTopics = exchangeAddrs.map(e => addrToTopic(e.addr));
