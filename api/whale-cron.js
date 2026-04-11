@@ -91,23 +91,34 @@ globalThis.__binanceWLts = globalThis.__binanceWLts || 0;
 globalThis.__lastPollTs = globalThis.__lastPollTs || {};
 
 async function fetchBinanceWhitelist(){
-  if(globalThis.__binanceWL && Date.now()-globalThis.__binanceWLts < 24*3600*1000){
+  if(globalThis.__binanceWL && globalThis.__binanceWL.size > 0 && Date.now()-globalThis.__binanceWLts < 24*3600*1000){
     return globalThis.__binanceWL;
   }
   const bases = new Set();
+  // Vercel 미국 서버에서 binance.com이 차단될 수 있음 → CoinGecko로 폴백
+  try {
+    // CoinGecko top 1000 (시총)
+    for(let page=1; page<=4; page++){
+      const r = await fetch(`https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=250&page=${page}`);
+      if(r.ok){
+        const d = await r.json();
+        if(Array.isArray(d)) d.forEach(c => bases.add((c.symbol||'').toUpperCase()));
+      }
+      await new Promise(rs => setTimeout(rs, 200));
+    }
+  } catch(e){ console.warn('cg fallback err:', e.message); }
+
+  // Binance도 시도 (DC region이면 통과)
   try {
     const sr = await fetch('https://api.binance.com/api/v3/exchangeInfo');
-    const sd = await sr.json();
-    (sd.symbols||[]).filter(s => s.status==='TRADING' &&
-      ['USDT','USDC','BTC','FDUSD'].includes(s.quoteAsset))
-      .forEach(s => bases.add(s.baseAsset.toUpperCase()));
+    if(sr.ok){
+      const sd = await sr.json();
+      (sd.symbols||[]).filter(s => s.status==='TRADING' &&
+        ['USDT','USDC','BTC','FDUSD'].includes(s.quoteAsset))
+        .forEach(s => bases.add(s.baseAsset.toUpperCase()));
+    }
   } catch(e){}
-  try {
-    const fr = await fetch('https://fapi.binance.com/fapi/v1/exchangeInfo');
-    const fd = await fr.json();
-    (fd.symbols||[]).filter(s => s.status==='TRADING' && s.contractType==='PERPETUAL')
-      .forEach(s => bases.add(s.baseAsset.toUpperCase()));
-  } catch(e){}
+
   globalThis.__binanceWL = bases;
   globalThis.__binanceWLts = Date.now();
   return bases;
@@ -189,51 +200,60 @@ async function sendTelegram(text){
 
 async function pollChain(chain, BNB){
   const exchanges = EXCHANGES[chain] || [];
-  const results = [];
 
-  for(const ex of exchanges){
-    const txs = await ethScan(chain, {
+  // 모든 거래소 병렬 폴링
+  const txArrays = await Promise.all(exchanges.map(ex =>
+    ethScan(chain, {
       module:'account', action:'tokentx',
-      address: ex.addr, page:1, offset:50, sort:'desc'
-    });
-    if(!Array.isArray(txs)) continue;
+      address: ex.addr, page:1, offset:30, sort:'desc'
+    }).then(r => ({ex, txs: Array.isArray(r) ? r : []}))
+  ));
 
+  // 1차 필터: 메타데이터 기반 (가격 조회 전)
+  const candidates = [];
+  for(const {ex, txs} of txArrays){
     for(const tx of txs){
       const dedupeKey = `${chain}-${tx.hash}-${tx.from}-${tx.to}`;
       if(globalThis.__seenHashes.has(dedupeKey)) continue;
 
       const from = (tx.from||'').toLowerCase();
       const to   = (tx.to||'').toLowerCase();
-
-      // 거래소 지갑이 from인 출금만
       if(from !== ex.addr.toLowerCase()) continue;
-      // CEX → CEX 제외
       if(EX_SET.has(to)) continue;
 
       const sym = (tx.tokenSymbol||'').toUpperCase();
       if(!sym || EXCLUDE.has(sym)) continue;
-      if(BNB && !BNB.has(sym)) continue;
+      if(BNB && BNB.size > 0 && !BNB.has(sym)) continue;
 
       const dec = parseInt(tx.tokenDecimal||'18');
       let amt = 0;
       try { amt = Number(BigInt(tx.value||'0')) / Math.pow(10, dec); } catch(e){}
       if(amt <= 0) continue;
 
-      const price = await getPrice(sym, tx.contractAddress, chain);
-      if(!price) continue;
-      const usd = amt * price;
-      if(usd < MIN_USD) continue;
-
-      // 신규 발견
-      globalThis.__seenHashes.add(dedupeKey);
-      results.push({
-        chain, sym, ca: tx.contractAddress, amt, usd, price,
-        from, to, hash: tx.hash, ex: ex.name,
-        ts: parseInt(tx.timeStamp||'0')*1000
-      });
+      candidates.push({chain, sym, ca: tx.contractAddress, amt,
+        from, to, hash: tx.hash, ex: ex.name, dedupeKey,
+        ts: parseInt(tx.timeStamp||'0')*1000});
     }
   }
 
+  // 2차 필터: 가격 조회 (병렬, 심볼별 dedup)
+  const uniqueSymbols = [...new Set(candidates.map(c => c.sym+'|'+c.ca))];
+  const priceMap = {};
+  await Promise.all(uniqueSymbols.map(async key => {
+    const [sym, ca] = key.split('|');
+    priceMap[key] = await getPrice(sym, ca, chain);
+  }));
+
+  // 3차: USD 필터 + dedup
+  const results = [];
+  for(const c of candidates){
+    const price = priceMap[c.sym+'|'+c.ca] || 0;
+    if(!price) continue;
+    const usd = c.amt * price;
+    if(usd < MIN_USD) continue;
+    globalThis.__seenHashes.add(c.dedupeKey);
+    results.push({...c, price, usd});
+  }
   return results;
 }
 
