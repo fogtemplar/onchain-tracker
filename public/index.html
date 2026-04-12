@@ -2775,7 +2775,9 @@ function whaleRender(){
     var toLabel = r.toENS ? '🏷 '+r.toENS : (EX_MAP[r.to] ? '🏦 '+EX_MAP[r.to] : '👤 '+r.to.slice(0,6)+'…'+r.to.slice(-4));
     var fromAgeStr = r.fromAge ? ' <span style="font-size:9px;color:#808080;font-weight:bold;">['+r.fromAge+']</span>' : '';
     var toAgeStr = r.toAge ? ' <span style="font-size:9px;color:#808080;font-weight:bold;">['+r.toAge+']</span>' : '';
-    var fromLinks = '<a href="'+exp+'/address/'+r.from+'" target="_blank" style="font-family:monospace;color:#0000ff;font-size:10px;">'+fromLabel+'</a>'+fromAgeStr+' <a href="https://debank.com/profile/'+r.from+'" target="_blank" style="font-size:9px;color:#008000;">(DeBank)</a>';
+    var fromPortfolio = r.chain==='sol' ? 'https://jup.ag/portfolio/'+r.from : 'https://debank.com/profile/'+r.from;
+    var fromPortName = r.chain==='sol' ? 'Jupiter' : 'DeBank';
+    var fromLinks = '<a href="'+exp+'/address/'+r.from+'" target="_blank" style="font-family:monospace;color:#0000ff;font-size:10px;">'+fromLabel+'</a>'+fromAgeStr+' <a href="'+fromPortfolio+'" target="_blank" style="font-size:9px;color:#008000;">('+fromPortName+')</a>';
     var toFlagStr = '';
     if(r.toFlags && r.toFlags.length){
       toFlagStr = ' ' + r.toFlags.map(function(f){
@@ -2784,7 +2786,9 @@ function whaleRender(){
         return '<span title="'+tip+'" style="background:'+bg+';color:#fff;padding:0 4px;font-size:8px;font-weight:bold;cursor:help;">'+f+'</span>';
       }).join(' ');
     }
-    var toLinks = '<a href="'+exp+'/address/'+r.to+'" target="_blank" style="font-family:monospace;color:#0000ff;font-size:10px;">'+toLabel+'</a>'+toAgeStr+toFlagStr+' <a href="https://debank.com/profile/'+r.to+'" target="_blank" style="font-size:9px;color:#008000;">(DeBank)</a>';
+    var toPortfolio = r.chain==='sol' ? 'https://jup.ag/portfolio/'+r.to : 'https://debank.com/profile/'+r.to;
+    var toPortName = r.chain==='sol' ? 'Jupiter' : 'DeBank';
+    var toLinks = '<a href="'+exp+'/address/'+r.to+'" target="_blank" style="font-family:monospace;color:#0000ff;font-size:10px;">'+toLabel+'</a>'+toAgeStr+toFlagStr+' <a href="'+toPortfolio+'" target="_blank" style="font-size:9px;color:#008000;">('+toPortName+')</a>';
     return '<tr>'+
       '<td style="white-space:nowrap;">'+ago+'</td>'+
       '<td><span style="color:'+(chainColor[r.chain]||'#000')+';font-weight:bold;">'+r.chain.toUpperCase()+'</span></td>'+
