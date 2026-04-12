@@ -1901,6 +1901,15 @@ function analyticsRenderWatchlist(){
         '<span>수신자: <b>'+w.unique_receivers+'</b></span>'+
         '<span>최근: <b>'+ago+'</b></span>'+
       '</div>'+
+      (function(){
+        var labels = [];
+        if(w.new_wallet_cnt > 0) labels.push('<span style="background:#800000;color:#fff;padding:1px 5px;font-size:8px;font-weight:bold;">🆕신규지갑 '+w.new_wallet_cnt+'</span>');
+        if(w.single_token_cnt > 0) labels.push('<span style="background:#800080;color:#fff;padding:1px 5px;font-size:8px;font-weight:bold;">🎯단일토큰 '+w.single_token_cnt+'</span>');
+        if(w.mcLabel === 'MICRO') labels.push('<span style="background:#808000;color:#fff;padding:1px 5px;font-size:8px;font-weight:bold;">MICRO CAP</span>');
+        else if(w.mcLabel === 'SMALL') labels.push('<span style="background:#004080;color:#fff;padding:1px 5px;font-size:8px;font-weight:bold;">SMALL CAP</span>');
+        if(w.is_new) labels.push('<span style="background:#008000;color:#fff;padding:1px 5px;font-size:8px;font-weight:bold;">NEW TOKEN</span>');
+        return labels.length ? '<div style="display:flex;flex-wrap:wrap;gap:3px;margin-top:5px;pointer-events:none;">'+labels.join('')+'</div>' : '';
+      })()+
     '</div>';
   }).join('');
 
@@ -2770,7 +2779,13 @@ function whaleRender(){
     var fromAgeStr = r.fromAge ? ' <span style="font-size:9px;color:#808080;font-weight:bold;">['+r.fromAge+']</span>' : '';
     var toAgeStr = r.toAge ? ' <span style="font-size:9px;color:#808080;font-weight:bold;">['+r.toAge+']</span>' : '';
     var fromLinks = '<a href="'+exp+'/address/'+r.from+'" target="_blank" style="font-family:monospace;color:#0000ff;font-size:10px;">'+fromLabel+'</a>'+fromAgeStr+' <a href="https://debank.com/profile/'+r.from+'" target="_blank" style="font-size:9px;color:#008000;">(DeBank)</a>';
-    var toFlagStr = r.toFlags && r.toFlags.length ? ' <span style="font-size:9px;color:#800000;font-weight:bold;">'+r.toFlags.join(' ')+'</span>' : '';
+    var toFlagStr = '';
+    if(r.toFlags && r.toFlags.length){
+      toFlagStr = ' ' + r.toFlags.map(function(f){
+        var bg = f.indexOf('신규')>=0 ? '#800000' : '#800080';
+        return '<span style="background:'+bg+';color:#fff;padding:0 4px;font-size:8px;font-weight:bold;">'+f+'</span>';
+      }).join(' ');
+    }
     var toLinks = '<a href="'+exp+'/address/'+r.to+'" target="_blank" style="font-family:monospace;color:#0000ff;font-size:10px;">'+toLabel+'</a>'+toAgeStr+toFlagStr+' <a href="https://debank.com/profile/'+r.to+'" target="_blank" style="font-size:9px;color:#008000;">(DeBank)</a>';
     return '<tr>'+
       '<td style="white-space:nowrap;">'+ago+'</td>'+

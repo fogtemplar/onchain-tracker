@@ -1432,6 +1432,21 @@ const httpServer = http.createServer(async (req, res) => {
         HAVING MIN(ts) >= ?
       `).all(now - 3 * 86400000).forEach(r => newTokens.add(r.sym + ':' + r.chain));
 
+      // 신규지갑/단일토큰 플래그 집계 (to_flags 컬럼)
+      const flagMap = {};
+      try {
+        db.prepare(`
+          SELECT sym, chain, to_flags FROM txs
+          WHERE ts >= ? AND to_flags IS NOT NULL AND to_flags != ''
+        `).all(now - 7 * 86400000).forEach(r => {
+          const key = r.sym + ':' + r.chain;
+          if (!flagMap[key]) flagMap[key] = { newWallet: 0, singleToken: 0 };
+          const flags = r.to_flags.split(',');
+          if (flags.some(f => f.includes('신규'))) flagMap[key].newWallet++;
+          if (flags.some(f => f.includes('단일'))) flagMap[key].singleToken++;
+        });
+      } catch (e) {}
+
       // 복합 점수 계산
       const scored = rows.map(r => {
         const key = r.sym + ':' + r.chain;
@@ -1467,6 +1482,7 @@ const httpServer = http.createServer(async (req, res) => {
 
         score = Math.min(100, Math.round(score));
 
+        const flags = flagMap[key] || { newWallet: 0, singleToken: 0 };
         return {
           sym: r.sym, chain: r.chain, ca: r.ca, score,
           cnt_7d: r.cnt_7d, cnt_24h: h24.cnt_24h, cnt_1h: h1.cnt_1h,
@@ -1474,6 +1490,7 @@ const httpServer = http.createServer(async (req, res) => {
           avg_usd: r.avg_usd, max_usd: r.max_usd,
           unique_receivers: r.unique_receivers, unique_senders: r.unique_senders,
           is_new: isNew, last_ts: r.last_ts,
+          new_wallet_cnt: flags.newWallet, single_token_cnt: flags.singleToken,
         };
       });
 
