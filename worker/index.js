@@ -879,15 +879,16 @@ async function buildCAList() {
     eth: 'ethereum', bsc: 'binance-smart-chain',
     arb: 'arbitrum-one', base: 'base', poly: 'polygon-pos',
   };
-  const newCAList = { eth: [], bsc: [], arb: [], base: [], poly: [] };
+  const newCAList = { eth: [], bsc: [], arb: [], base: [], poly: [], sol: [] };
   const seen = new Set();
 
   topCoins.forEach(c => {
     const sym = (c.symbol || '').toUpperCase();
     if (!BNB.has(sym)) return;
-    if (EXCLUDE.has(sym)) return; // 메이저/스테이블 제외
+    if (EXCLUDE.has(sym)) return;
     const platforms = idToPlatforms[c.id];
     if (!platforms) return;
+    // EVM chains
     for (const ch of Object.keys(platformKey)) {
       const ca = platforms[platformKey[ch]];
       if (ca && ca.startsWith('0x') && ca.length === 42) {
@@ -898,12 +899,21 @@ async function buildCAList() {
         }
       }
     }
+    // Solana
+    const solMint = platforms['solana'];
+    if (solMint && solMint.length >= 32 && !solMint.startsWith('0x')) {
+      const key = 'sol:' + solMint;
+      if (!seen.has(key)) {
+        newCAList.sol.push(solMint);
+        seen.add(key);
+      }
+    }
   });
 
   state.caList = newCAList;
   state.caListTs = Date.now();
   const total = Object.values(newCAList).reduce((s, a) => s + a.length, 0);
-  log(`CA list 빌드 완료: ${total}개 (eth:${newCAList.eth.length} bsc:${newCAList.bsc.length} arb:${newCAList.arb.length} base:${newCAList.base.length} poly:${newCAList.poly.length})`);
+  log(`CA list 빌드 완료: ${total}개 (eth:${newCAList.eth.length} bsc:${newCAList.bsc.length} arb:${newCAList.arb.length} base:${newCAList.base.length} poly:${newCAList.poly.length} sol:${newCAList.sol.length})`);
 
   // SQLite에 CA 리스트 캐시 (CoinGecko 실패 대비 폴백)
   if (total > 0) {
@@ -1451,6 +1461,105 @@ function connectSolana() {
   }, 30000);
 }
 
+// Solana Full 모드: 토큰 mint 기반 구독 (여러 WS 연결)
+function connectSolanaFull() {
+  const mints = state.caList.sol || [];
+  if (mints.length === 0) {
+    log('[SOL-full] mint 리스트 비어있음, 스킵');
+    return;
+  }
+
+  // 공용 Solana RPC는 연결당 ~10개 구독 제한
+  const CHUNK = 10;
+  const chunks = [];
+  for (let i = 0; i < mints.length; i += CHUNK) chunks.push(mints.slice(i, i + CHUNK));
+  log(`[SOL-full] ${mints.length}개 mint, ${chunks.length}개 WS 연결 시작...`);
+
+  if (!state.wsSolFull) state.wsSolFull = [];
+
+  chunks.forEach((chunk, ci) => {
+    const ws = new WebSocket(SOL_WSS);
+
+    ws.on('open', () => {
+      log(`[SOL-full #${ci}] 연결됨 — ${chunk.length}개 mint 구독`);
+      chunk.forEach((mint, i) => {
+        ws.send(JSON.stringify({
+          jsonrpc: '2.0',
+          id: 4000 + ci * 100 + i,
+          method: 'logsSubscribe',
+          params: [
+            { mentions: [mint] },
+            { commitment: 'confirmed' },
+          ],
+        }));
+      });
+    });
+
+    ws.on('message', async (data) => {
+      try {
+        const msg = JSON.parse(data.toString());
+        if (msg.method === 'logsNotification') {
+          const sig = msg.params?.result?.value?.signature;
+          if (sig) await handleSolanaTransaction(sig);
+        }
+      } catch (e) {}
+    });
+
+    ws.on('error', (err) => log(`[SOL-full #${ci}] error:`, err.message));
+
+    ws.on('close', () => {
+      log(`[SOL-full #${ci}] 끊김 — 10초 후 재연결`);
+      setTimeout(() => {
+        const idx = state.wsSolFull.indexOf(ws);
+        if (idx >= 0) state.wsSolFull.splice(idx, 1);
+        // 재연결: 같은 청크
+        connectSolanaFullChunk(chunk, ci);
+      }, 10000);
+    });
+
+    const pingTimer = setInterval(() => {
+      if (ws.readyState === WebSocket.OPEN) {
+        try { ws.ping(); } catch (e) {}
+      } else { clearInterval(pingTimer); }
+    }, 30000);
+
+    state.wsSolFull.push(ws);
+  });
+}
+
+function connectSolanaFullChunk(chunk, ci) {
+  const ws = new WebSocket(SOL_WSS);
+  ws.on('open', () => {
+    log(`[SOL-full #${ci}] 재연결 — ${chunk.length}개 mint`);
+    chunk.forEach((mint, i) => {
+      ws.send(JSON.stringify({
+        jsonrpc: '2.0', id: 4000 + ci * 100 + i,
+        method: 'logsSubscribe',
+        params: [{ mentions: [mint] }, { commitment: 'confirmed' }],
+      }));
+    });
+  });
+  ws.on('message', async (data) => {
+    try {
+      const msg = JSON.parse(data.toString());
+      if (msg.method === 'logsNotification') {
+        const sig = msg.params?.result?.value?.signature;
+        if (sig) await handleSolanaTransaction(sig);
+      }
+    } catch (e) {}
+  });
+  ws.on('error', (err) => log(`[SOL-full #${ci}] error:`, err.message));
+  ws.on('close', () => {
+    log(`[SOL-full #${ci}] 끊김 — 10초 후 재연결`);
+    setTimeout(() => connectSolanaFullChunk(chunk, ci), 10000);
+  });
+  const pt = setInterval(() => {
+    if (ws.readyState === WebSocket.OPEN) { try { ws.ping(); } catch (e) {} }
+    else clearInterval(pt);
+  }, 30000);
+  state.wsSolFull.push(ws);
+}
+
 // ── Full mode WebSocket: subscribe to token CAs (Transfer events) ──
 function connectChainFull(chain) {
   const cas = state.caList[chain] || [];
@@ -1568,7 +1677,12 @@ const httpServer = http.createServer(async (req, res) => {
       db_path: DB_PATH,
       chains: {
         full: Object.keys(state.wsFull).map(c => ({ chain: c, connected: state.wsFull[c]?.readyState === WebSocket.OPEN, ca_count: state.caList[c]?.length || 0 })),
-        sol: { connected: state.wsSol?.readyState === WebSocket.OPEN, exchanges: SOL_EXCHANGES.length },
+        sol: {
+          cex: state.wsSol?.readyState === WebSocket.OPEN,
+          exchanges: SOL_EXCHANGES.length,
+          full: (state.wsSolFull || []).filter(ws => ws.readyState === WebSocket.OPEN).length,
+          mints: (state.caList.sol || []).length,
+        },
       },
       ca_total: totalCA,
       ca_per_chain: Object.fromEntries(Object.entries(state.caList).map(([k, v]) => [k, v.length])),
@@ -2094,14 +2208,15 @@ httpServer.listen(PORT, () => log(`HTTP+WS server on :${PORT}`));
 
   // Solana 시작
   await preloadSolTokens();
-  connectSolana();
+  connectSolana();           // 거래소 모니터링
+  connectSolanaFull();       // 토큰 mint 기반 full 모드
 
   await sendTelegram(
     `🚀 <b>Whale Worker 시작</b>\n` +
     `6체인 WebSocket 연결 (EVM 5 + Solana)\n` +
     `임계값: $${fN(MIN_USD)}+\n` +
-    `EVM 구독: ${totalCA}개 CA\n` +
-    `SOL 거래소: ${SOL_EXCHANGES.length}개\n` +
+    `EVM 구독: ${totalCA - (state.caList.sol||[]).length}개 CA\n` +
+    `SOL: ${(state.caList.sol||[]).length}개 mint + ${SOL_EXCHANGES.length}개 거래소\n` +
     `DEX/Bridge ${DEX_BLACKLIST.size}개 블랙리스트`
   );
 })();
@@ -2111,6 +2226,7 @@ process.on('SIGTERM', () => {
   log('SIGTERM 받음 — 종료');
   Object.values(state.wsFull).forEach(ws => { try { ws.close(); } catch (e) {} });
   if (state.wsSol) try { state.wsSol.close(); } catch (e) {}
+  (state.wsSolFull || []).forEach(ws => { try { ws.close(); } catch (e) {} });
   try { db.close(); } catch (e) {}
   process.exit(0);
 });
