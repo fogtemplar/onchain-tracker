@@ -8,7 +8,8 @@ import http from 'http';
 import Database from 'better-sqlite3';
 import fs from 'fs';
 import path from 'path';
-import { keccak256 } from 'js-sha3';
+import pkg from 'js-sha3';
+const { keccak256 } = pkg;
 
 // ── Config (env or hardcoded fallback) ──
 const ALCHEMY_KEY = process.env.ALCHEMY_KEY || 'I3Is5NQvnbgijvrbhdFp9';
