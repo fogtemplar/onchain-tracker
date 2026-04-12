@@ -1634,10 +1634,10 @@ window.addEventListener('DOMContentLoaded', function(){
   </div>
 
   <!-- 이상 신호 섹션 -->
-  <div style="padding:14px 20px;background:#c0c0c0;border-bottom:2px solid #404040;">
-    <div style="font-size:12px;font-weight:bold;color:#800000;margin-bottom:10px;">🚨 이상 신호 감지</div>
-    <div id="anomalyList" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:10px;">
-      <div style="padding:20px;text-align:center;color:#404040;font-size:11px;grid-column:1/-1;">데이터 로딩 중...</div>
+  <div style="padding:8px 20px;background:#c0c0c0;border-bottom:2px solid #404040;">
+    <div style="font-size:11px;font-weight:bold;color:#800000;margin-bottom:4px;">🚨 이상 신호</div>
+    <div id="anomalyList" style="font-size:11px;color:#000;">
+      <span style="color:#404040;">로딩 중...</span>
     </div>
   </div>
 
@@ -1861,22 +1861,22 @@ async function analyticsLoadAnomalies(){
 
 function analyticsRenderAnomalies(){
   var arr = ANALYTICS.anomalies;
+  var el = document.getElementById('anomalyList');
+  if(!el) return;
   if(!arr.length){
-    document.getElementById('anomalyList').innerHTML = '<div style="padding:20px;text-align:center;color:#404040;font-size:11px;grid-column:1/-1;">감지된 이상 신호 없음</div>';
+    el.innerHTML = '<span style="color:#404040;">감지된 이상 신호 없음</span>';
     return;
   }
-  // severity 우선 정렬
   arr.sort(function(a,b){
     if(a.severity !== b.severity) return a.severity==='high' ? -1 : 1;
     return (b.total_usd||0) - (a.total_usd||0);
   });
-  document.getElementById('anomalyList').innerHTML = arr.map(function(a){
-    var typeIcon = {spike:'🌋', mega:'🐋', cluster:'🔁', newcomer:'🎯', accumulator:'📈'}[a.type] || '⚡';
-    return '<div class="anom-card '+(a.severity==='high'?'high':'')+'">'+
-      '<div class="anom-title">'+typeIcon+' '+a.title+'</div>'+
-      '<div class="anom-desc">'+a.desc+'</div>'+
-      (a.total_usd ? '<div style="margin-top:4px;color:#000080;font-weight:bold;">총액: $'+fN(a.total_usd)+'</div>' : '')+
-    '</div>';
+  var icons = {spike:'🌋', mega:'🐋', cluster:'🔁', newcomer:'🎯', accumulator:'📈'};
+  el.innerHTML = arr.map(function(a){
+    var icon = icons[a.type] || '⚡';
+    var col = a.severity==='high' ? '#800000' : '#000';
+    var usd = a.total_usd ? ' $'+fN(a.total_usd) : '';
+    return '<span style="color:'+col+';margin-right:14px;white-space:nowrap;">'+icon+' '+a.title+' — '+a.desc+usd+'</span>';
   }).join('');
 }
 
