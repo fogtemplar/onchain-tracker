@@ -1324,7 +1324,7 @@ const httpServer = http.createServer(async (req, res) => {
       });
 
       scored.sort((a, b) => b.score - a.score);
-      const top = scored.slice(0, 30);
+      const top = scored.slice(0, 50);
 
       // FDV/MC 조회 (캐스케이드: CoinGecko > CMC > DexScreener)
       await Promise.all(top.map(async (t) => {
