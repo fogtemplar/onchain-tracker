@@ -414,29 +414,49 @@ async function rpcCall(chain, method, params) {
   return d.result;
 }
 
-// 동적 LP pair 감지: token0()/token1() 가능하면 LP로 간주 (캐시)
-// state.lpAddresses는 set, state.notLpCache는 한 번 검사한 비-LP 주소
-state.notLpCache = state.notLpCache || new Set();
+// ── LP 감지 DB (SQLite 영구 캐시) ──
+db.exec(`
+  CREATE TABLE IF NOT EXISTS addr_type (
+    addr TEXT PRIMARY KEY,
+    is_lp INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+  )
+`);
+const stmtAddrGet = db.prepare('SELECT is_lp FROM addr_type WHERE addr = ?');
+const stmtAddrSet = db.prepare('INSERT OR REPLACE INTO addr_type (addr, is_lp, updated_at) VALUES (?, ?, ?)');
 
 async function isLPPair(chain, addr) {
   const lo = addr.toLowerCase();
+  // 1. 메모리
   if (state.lpAddresses.has(lo)) return true;
   if (state.notLpCache.has(lo)) return false;
   if (LP_MANAGERS.has(lo)) { state.lpAddresses.add(lo); return true; }
-  // EOA 가능성 체크 — eth_getCode → '0x'면 EOA
+
+  // 2. SQLite
+  try {
+    const row = stmtAddrGet.get(lo);
+    if (row) {
+      if (row.is_lp) { state.lpAddresses.add(lo); return true; }
+      else { state.notLpCache.add(lo); return false; }
+    }
+  } catch (e) {}
+
+  // 3. RPC (첫 조회만 — CU 소비)
   try {
     const code = await rpcCall(chain, 'eth_getCode', [addr, 'latest']);
     if (!code || code === '0x' || code.length < 4) {
       state.notLpCache.add(lo);
+      try { stmtAddrSet.run(lo, 0, Date.now()); } catch (e) {}
       return false;
     }
-    // token0() 호출 시도 — selector 0x0dfe1681
     const t0 = await rpcCall(chain, 'eth_call', [{ to: addr, data: '0x0dfe1681' }, 'latest']);
     if (t0 && t0 !== '0x' && t0.length >= 66) {
       state.lpAddresses.add(lo);
+      try { stmtAddrSet.run(lo, 1, Date.now()); } catch (e) {}
       return true;
     }
     state.notLpCache.add(lo);
+    try { stmtAddrSet.run(lo, 0, Date.now()); } catch (e) {}
     return false;
   } catch (e) {
     state.notLpCache.add(lo);
@@ -444,9 +464,41 @@ async function isLPPair(chain, addr) {
   }
 }
 
+state.notLpCache = state.notLpCache || new Set();
+
+// ── 메타 DB (SQLite 영구 캐시 — Alchemy CU 절약) ──
+db.exec(`
+  CREATE TABLE IF NOT EXISTS token_meta (
+    chain_ca TEXT PRIMARY KEY,
+    symbol TEXT NOT NULL,
+    decimals INTEGER NOT NULL DEFAULT 18,
+    total_supply REAL DEFAULT 0,
+    updated_at INTEGER NOT NULL
+  )
+`);
+const stmtMetaGet = db.prepare('SELECT * FROM token_meta WHERE chain_ca = ?');
+const stmtMetaSet = db.prepare(`
+  INSERT OR REPLACE INTO token_meta (chain_ca, symbol, decimals, total_supply, updated_at)
+  VALUES (@chain_ca, @symbol, @decimals, @total_supply, @updated_at)
+`);
+
 async function getTokenMeta(chain, ca) {
   const key = `${chain}:${ca.toLowerCase()}`;
+
+  // 1. 메모리 캐시
   if (state.metaCache.has(key)) return state.metaCache.get(key);
+
+  // 2. SQLite 영구 캐시 (7일 TTL)
+  try {
+    const row = stmtMetaGet.get(key);
+    if (row && Date.now() - row.updated_at < 7 * 86400 * 1000) {
+      const meta = { symbol: row.symbol, decimals: row.decimals, totalSupply: row.total_supply };
+      state.metaCache.set(key, meta);
+      return meta;
+    }
+  } catch (e) {}
+
+  // 3. RPC 호출 (Alchemy CU 소비 — 첫 조회만)
   try {
     const [symHex, decHex, supHex] = await Promise.all([
       rpcCall(chain, 'eth_call', [{ to: ca, data: '0x95d89b41' }, 'latest']),
@@ -458,7 +510,13 @@ async function getTokenMeta(chain, ca) {
     let totalSupply = 0;
     try { totalSupply = Number(BigInt(supHex || '0x0')) / Math.pow(10, decimals); } catch (e) {}
     const meta = { symbol, decimals, totalSupply };
+
+    // 메모리 + SQLite 저장
     state.metaCache.set(key, meta);
+    try {
+      stmtMetaSet.run({ chain_ca: key, symbol, decimals, total_supply: totalSupply, updated_at: Date.now() });
+    } catch (e) {}
+
     return meta;
   } catch (e) {
     return { symbol: '?', decimals: 18, totalSupply: 0 };
@@ -1019,7 +1077,13 @@ const httpServer = http.createServer((req, res) => {
       },
       ca_total: totalCA,
       ca_per_chain: Object.fromEntries(Object.entries(state.caList).map(([k, v]) => [k, v.length])),
-      cache: { prices: state.priceCache.size, meta: state.metaCache.size, seen: state.seenHashes.size },
+      cache: {
+        prices: state.priceCache.size,
+        meta_mem: state.metaCache.size,
+        meta_db: db.prepare('SELECT COUNT(*) AS c FROM token_meta').get().c,
+        lp_db: db.prepare('SELECT COUNT(*) AS c FROM addr_type').get().c,
+        seen: state.seenHashes.size,
+      },
       binance_wl: state.binanceWL?.size || 0,
       dex_blacklist: DEX_BLACKLIST.size,
     }, null, 2));
