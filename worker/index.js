@@ -1326,28 +1326,77 @@ const httpServer = http.createServer(async (req, res) => {
       scored.sort((a, b) => b.score - a.score);
       const top = scored.slice(0, 30);
 
-      // FDV/MC 조회 (DexScreener, 병렬 — 최대 30건)
+      // FDV/MC 조회 (캐스케이드: CoinGecko > CMC > DexScreener)
       await Promise.all(top.map(async (t) => {
-        try {
-          const r = await fetch(`https://api.dexscreener.com/latest/dex/tokens/${t.ca}`,
-            { signal: AbortSignal.timeout(5000) });
-          if (!r.ok) return;
-          const d = await r.json();
-          const valid = (d.pairs || [])
-            .filter(p => p.priceUsd && parseFloat(p.priceUsd) > 0 && (p.liquidity?.usd || 0) >= 1000);
-          if (!valid.length) return;
-          valid.sort((a, b) => (b.liquidity?.usd || 0) - (a.liquidity?.usd || 0));
-          const best = valid[0];
-          t.fdv = best.fdv || 0;
-          t.mc = best.marketCap || best.fdv || 0;
-          t.liq = best.liquidity?.usd || 0;
-          t.price = parseFloat(best.priceUsd) || 0;
-          // 저시총 라벨
-          if (t.mc > 0 && t.mc < 10e6) t.mcLabel = 'MICRO';       // <$10M
-          else if (t.mc > 0 && t.mc < 50e6) t.mcLabel = 'SMALL';   // <$50M
-          else if (t.mc > 0 && t.mc < 200e6) t.mcLabel = 'MID';
-          else t.mcLabel = '';
-        } catch (e) {}
+        const sym = t.sym;
+        const caLo = (t.ca || '').toLowerCase();
+        const platform = PLATFORM_MAP[t.chain];
+
+        // 1. CoinGecko (CA 기반 — MC/FDV 정확)
+        if (platform && caLo) {
+          try {
+            const r = await fetch(`https://api.coingecko.com/api/v3/coins/${platform}/contract/${caLo}`,
+              { signal: AbortSignal.timeout(5000) });
+            if (r.ok) {
+              const d = await r.json();
+              const md = d.market_data;
+              if (md) {
+                t.mc = md.market_cap?.usd || 0;
+                t.fdv = md.fully_diluted_valuation?.usd || 0;
+                t.price = md.current_price?.usd || 0;
+                if (t.mc > 0 || t.fdv > 0) {
+                  t.mcLabel = t.mc > 0 && t.mc < 10e6 ? 'MICRO' : t.mc < 50e6 ? 'SMALL' : t.mc < 200e6 ? 'MID' : '';
+                  return;
+                }
+              }
+            }
+          } catch (e) {}
+        }
+
+        // 2. CMC (심볼 기반)
+        if (sym && CMC_KEY) {
+          try {
+            const r = await fetch(`https://pro-api.coinmarketcap.com/v1/cryptocurrency/quotes/latest?symbol=${sym}&convert=USD`,
+              { headers: { 'X-CMC_PRO_API_KEY': CMC_KEY }, signal: AbortSignal.timeout(5000) });
+            if (r.ok) {
+              const d = await r.json();
+              const info = d.data?.[sym];
+              if (info) {
+                t.mc = info.quote?.USD?.market_cap || 0;
+                t.fdv = info.quote?.USD?.fully_diluted_market_cap || 0;
+                t.price = info.quote?.USD?.price || 0;
+                if (t.mc > 0 || t.fdv > 0) {
+                  t.mcLabel = t.mc > 0 && t.mc < 10e6 ? 'MICRO' : t.mc < 50e6 ? 'SMALL' : t.mc < 200e6 ? 'MID' : '';
+                  return;
+                }
+              }
+            }
+          } catch (e) {}
+        }
+
+        // 3. DexScreener (마지막 폴백)
+        if (caLo) {
+          try {
+            const r = await fetch(`https://api.dexscreener.com/latest/dex/tokens/${caLo}`,
+              { signal: AbortSignal.timeout(5000) });
+            if (r.ok) {
+              const d = await r.json();
+              const valid = (d.pairs || [])
+                .filter(p => p.priceUsd && parseFloat(p.priceUsd) > 0 && (p.liquidity?.usd || 0) >= 1000);
+              if (valid.length) {
+                valid.sort((a, b) => (b.liquidity?.usd || 0) - (a.liquidity?.usd || 0));
+                const best = valid[0];
+                t.fdv = best.fdv || 0;
+                t.mc = best.marketCap || best.fdv || 0;
+                t.liq = best.liquidity?.usd || 0;
+                t.price = parseFloat(best.priceUsd) || 0;
+              }
+            }
+          } catch (e) {}
+        }
+
+        // 라벨
+        t.mcLabel = t.mc > 0 && t.mc < 10e6 ? 'MICRO' : t.mc > 0 && t.mc < 50e6 ? 'SMALL' : t.mc > 0 && t.mc < 200e6 ? 'MID' : '';
       }));
 
       res.writeHead(200, { 'Content-Type': 'application/json' });
