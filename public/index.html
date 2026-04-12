@@ -1741,12 +1741,11 @@ window.addEventListener('DOMContentLoaded', function(){
           <th style="text-align:right;">USD</th>
           <th>From</th>
           <th>To</th>
-          <th>위험</th>
           <th>TX</th>
         </tr>
       </thead>
       <tbody id="whaleBody">
-        <tr><td colspan="11" style="padding:30px;text-align:center;color:#404040;">▶ 시작 버튼을 눌러 실시간 WebSocket 모니터링을 시작하세요</td></tr>
+        <tr><td colspan="10" style="padding:30px;text-align:center;color:#404040;">▶ 시작 버튼을 눌러 실시간 WebSocket 모니터링을 시작하세요</td></tr>
       </tbody>
     </table>
   </div>
@@ -2680,19 +2679,19 @@ function whaleRender(){
   var body = document.getElementById('whaleBody');
   if(!body) return;
   if(!WHALE.rows.length){
-    body.innerHTML = '<tr><td colspan="11" style="padding:30px;text-align:center;color:#404040;">감지된 트랜잭션 없음</td></tr>';
+    body.innerHTML = '<tr><td colspan="10" style="padding:30px;text-align:center;color:#404040;">감지된 트랜잭션 없음</td></tr>';
     return;
   }
   var chainColor = {eth:'#627eea',bsc:'#f0b90b',arb:'#28a0f0',base:'#0052ff',poly:'#8247e5'};
   body.innerHTML = WHALE.rows.map(function(r){
     var exp = CHAIN_EXP[r.chain]||'';
     var ago = tAgo(r.ts/1000);
-    var riskColor = r.risk==='crit'?'#800000':r.risk==='high'?'#808000':'#000080';
-    var riskLabel = r.risk==='crit'?'🔴 극심':r.risk==='high'?'🟠 높음':'🟡 주의';
     var pctStr = r.supplyPct > 0 ? r.supplyPct.toFixed(2)+'%' : '—';
     var pctColor = r.supplyPct >= 1 ? '#800000' : r.supplyPct >= 0.1 ? '#808000' : '#000080';
     var fromLabel = EX_MAP[r.from] ? '🏦 '+EX_MAP[r.from] : '👤 '+r.from.slice(0,6)+'…'+r.from.slice(-4);
     var toLabel = EX_MAP[r.to] ? '🏦 '+EX_MAP[r.to] : '👤 '+r.to.slice(0,6)+'…'+r.to.slice(-4);
+    var fromLinks = '<a href="'+exp+'/address/'+r.from+'" target="_blank" style="font-family:monospace;color:#0000ff;font-size:10px;">'+fromLabel+'</a> <a href="https://debank.com/profile/'+r.from+'" target="_blank" style="font-size:9px;color:#008000;">(DeBank)</a>';
+    var toLinks = '<a href="'+exp+'/address/'+r.to+'" target="_blank" style="font-family:monospace;color:#0000ff;font-size:10px;">'+toLabel+'</a> <a href="https://debank.com/profile/'+r.to+'" target="_blank" style="font-size:9px;color:#008000;">(DeBank)</a>';
     return '<tr>'+
       '<td style="white-space:nowrap;">'+ago+'</td>'+
       '<td><span style="color:'+(chainColor[r.chain]||'#000')+';font-weight:bold;">'+r.chain.toUpperCase()+'</span></td>'+
@@ -2700,10 +2699,9 @@ function whaleRender(){
       '<td style="font-weight:bold;">'+r.sym+'</td>'+
       '<td style="text-align:right;">'+fN(r.amt)+'</td>'+
       '<td style="text-align:right;color:'+pctColor+';font-weight:bold;">'+pctStr+'</td>'+
-      '<td style="text-align:right;font-weight:bold;color:'+riskColor+';">$'+fN(r.usd)+'</td>'+
-      '<td><a href="'+exp+'/address/'+r.from+'" target="_blank" style="font-family:monospace;color:#0000ff;font-size:10px;">'+fromLabel+'</a></td>'+
-      '<td><a href="'+exp+'/address/'+r.to+'" target="_blank" style="font-family:monospace;color:#0000ff;font-size:10px;">'+toLabel+'</a></td>'+
-      '<td><span style="color:'+riskColor+';font-weight:bold;">'+riskLabel+'</span></td>'+
+      '<td style="text-align:right;font-weight:bold;">$'+fN(r.usd)+'</td>'+
+      '<td>'+fromLinks+'</td>'+
+      '<td>'+toLinks+'</td>'+
       '<td><a href="'+exp+'/tx/'+r.hash+'" target="_blank" style="color:#0000ff;">TX↗</a></td>'+
     '</tr>';
   }).join('');
