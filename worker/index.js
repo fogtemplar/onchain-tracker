@@ -362,7 +362,8 @@ function classifyTxType(from, to, fromEx, toEx) {
 
 // ── State ──
 const state = {
-  wsFull: {},                // chain → WebSocket (full 모드)
+  wsFull: {},                // chain → WebSocket (EVM full 모드)
+  wsSolFull: [],             // Solana WebSocket 연결들
 
   priceCache: new Map(),
   metaCache: new Map(),
@@ -1163,22 +1164,6 @@ const SOL_WSS = 'wss://api.mainnet-beta.solana.com';
 const SOL_HTTP = 'https://api.mainnet-beta.solana.com';
 const SOL_EXP = 'https://solscan.io';
 
-const SOL_EXCHANGES = [
-  { name:'Binance', addr:'5tzFkiKscXHK5ZXCGbXZxdw7gTjjD1mBwuoFbhUvuAi9' },
-  { name:'Binance', addr:'9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM' },
-  { name:'Binance', addr:'3gB8cY5JfHgKLnqXo94mEn7HZHK7jGDui2De5HzAcsCR' },
-  { name:'OKX',     addr:'5VCwKtCXgCDuQosrzMcUh1p5wfwUHHKhm7wtw5G8XGWu' },
-  { name:'Bybit',   addr:'AC5RDfQFmDS1deWZos921JfqscXdByf6BKHAbfbw3AFF' },
-  { name:'Coinbase',addr:'H8sMJSCQxfKiFTCfDR3DUMLPwcRbM61LGFJ8N4dK3WjS' },
-  { name:'Kraken',  addr:'FWznbcNXWQuHTawe9RxvQ2LdCENssh12dsznf4RiWB7t' },
-  { name:'KuCoin',  addr:'BmFdpraQhkiDQE6SnfG5PVddTtR5yFSb2PVkPsG2FJqH' },
-  { name:'Gate',    addr:'u6PJ8DtQuPFnfmwHbGFULQ4u4EgjDiyYKjVEsynXq2w' },
-  { name:'MEXC',    addr:'ASTyfSima4LLAdDgoFGkgqoKowG1LZFDr9fAQrg7iaJZ' },
-  { name:'Bitget',  addr:'A77HErCMBsHJnM7rxviRMECvSMuok2fNhTmLFHqXR2gf' },
-];
-
-const SOL_EX_MAP = new Map();
-SOL_EXCHANGES.forEach(e => SOL_EX_MAP.set(e.addr, e.name));
 
 async function solRpc(method, params) {
   const body = JSON.stringify({ jsonrpc: '2.0', method, params, id: 1 });
@@ -1339,8 +1324,8 @@ async function handleSolanaTransaction(sig) {
       // from/to: authority = 실제 지갑 주소
       const from = info.authority || info.source || '';
       const to = info.destination || '';
-      const fromEx = SOL_EX_MAP.get(from) || null;
-      const toEx = SOL_EX_MAP.get(to) || null;
+      const fromEx = null;
+      const toEx = null;
       if (fromEx && toEx) continue; // 거래소 내부 이체 제외
 
       const txClass = { type: 'p2p', label: '개인이체', tag: '' };
@@ -1404,61 +1389,6 @@ async function handleSolanaTransaction(sig) {
   } catch (e) {
     if (!e.message?.includes('not found')) log('[SOL] handleTx err:', e.message);
   }
-}
-
-function connectSolana() {
-  log('[SOL] WebSocket 연결 중...');
-  const ws = new WebSocket(SOL_WSS);
-  state.wsSol = ws;
-  let subCount = 0;
-
-  ws.on('open', () => {
-    log('[SOL] 연결됨 — 거래소 주소 구독 중...');
-    SOL_EXCHANGES.forEach((ex, i) => {
-      ws.send(JSON.stringify({
-        jsonrpc: '2.0',
-        id: 3000 + i,
-        method: 'logsSubscribe',
-        params: [
-          { mentions: [ex.addr] },
-          { commitment: 'confirmed' },
-        ],
-      }));
-    });
-  });
-
-  ws.on('message', async (data) => {
-    try {
-      const msg = JSON.parse(data.toString());
-      if (msg.id != null && msg.result != null) {
-        subCount++;
-        if (subCount === SOL_EXCHANGES.length) {
-          log(`[SOL] 구독 완료 (${subCount}개 거래소)`);
-        }
-        return;
-      }
-      if (msg.method === 'logsNotification') {
-        const sig = msg.params?.result?.value?.signature;
-        if (sig) await handleSolanaTransaction(sig);
-      }
-    } catch (e) {}
-  });
-
-  ws.on('error', (err) => log('[SOL] ws error:', err.message));
-
-  ws.on('close', () => {
-    log('[SOL] 연결 끊김 — 5초 후 재연결...');
-    state.wsSol = null;
-    setTimeout(() => connectSolana(), 5000);
-  });
-
-  const pingTimer = setInterval(() => {
-    if (ws.readyState === WebSocket.OPEN) {
-      try { ws.ping(); } catch (e) {}
-    } else {
-      clearInterval(pingTimer);
-    }
-  }, 30000);
 }
 
 // Solana Full 모드: 토큰 mint 기반 구독 (여러 WS 연결)
@@ -1678,9 +1608,7 @@ const httpServer = http.createServer(async (req, res) => {
       chains: {
         full: Object.keys(state.wsFull).map(c => ({ chain: c, connected: state.wsFull[c]?.readyState === WebSocket.OPEN, ca_count: state.caList[c]?.length || 0 })),
         sol: {
-          cex: state.wsSol?.readyState === WebSocket.OPEN,
-          exchanges: SOL_EXCHANGES.length,
-          full: (state.wsSolFull || []).filter(ws => ws.readyState === WebSocket.OPEN).length,
+          connections: (state.wsSolFull || []).filter(ws => ws.readyState === WebSocket.OPEN).length,
           mints: (state.caList.sol || []).length,
         },
       },
@@ -2206,17 +2134,16 @@ httpServer.listen(PORT, () => log(`HTTP+WS server on :${PORT}`));
     }
   }
 
-  // Solana 시작
+  // Solana 시작 (Full 모드: 토큰 mint 기반)
   await preloadSolTokens();
-  connectSolana();           // 거래소 모니터링
-  connectSolanaFull();       // 토큰 mint 기반 full 모드
+  connectSolanaFull();
 
   await sendTelegram(
     `🚀 <b>Whale Worker 시작</b>\n` +
     `6체인 WebSocket 연결 (EVM 5 + Solana)\n` +
     `임계값: $${fN(MIN_USD)}+\n` +
     `EVM 구독: ${totalCA - (state.caList.sol||[]).length}개 CA\n` +
-    `SOL: ${(state.caList.sol||[]).length}개 mint + ${SOL_EXCHANGES.length}개 거래소\n` +
+    `SOL: ${(state.caList.sol||[]).length}개 mint\n` +
     `DEX/Bridge ${DEX_BLACKLIST.size}개 블랙리스트`
   );
 })();
@@ -2225,7 +2152,6 @@ httpServer.listen(PORT, () => log(`HTTP+WS server on :${PORT}`));
 process.on('SIGTERM', () => {
   log('SIGTERM 받음 — 종료');
   Object.values(state.wsFull).forEach(ws => { try { ws.close(); } catch (e) {} });
-  if (state.wsSol) try { state.wsSol.close(); } catch (e) {}
   (state.wsSolFull || []).forEach(ws => { try { ws.close(); } catch (e) {} });
   try { db.close(); } catch (e) {}
   process.exit(0);
