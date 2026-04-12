@@ -17,6 +17,7 @@ const MIN_USD     = parseInt(process.env.MIN_USD || '100000');
 const PORT        = parseInt(process.env.PORT || '3000');
 const CMC_KEY     = process.env.CMC_KEY     || '7c23a703-55ff-4b19-babd-a4cf83aae98c';
 const CG_API_KEY  = process.env.CG_API_KEY  || 'b745429f379948b8b715f6beded5c2ea';
+const ETH_KEY     = process.env.ETHERSCAN_KEY || 'MFC6RKPAYYCWID4YEH9ZM7FJWTZPY9HM4Z';
 
 // ── Chain config ──
 // WebSocket: Alchemy (실시간 구독 필수) / HTTP: 무료 PublicNode 우선 → Alchemy CU 절약
@@ -29,6 +30,9 @@ const CHAINS = {
 };
 
 const TRANSFER_TOPIC = '0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef';
+
+// Etherscan V2 chainid 매핑
+const CHAIN_ID = { eth: 1, bsc: 56, arb: 42161, base: 8453, poly: 137 };
 
 // ── SQLite (Railway Volume /data 또는 로컬 ./data) ──
 const DATA_DIR = process.env.DATA_DIR || (fs.existsSync('/data') ? '/data' : './data');
@@ -66,13 +70,15 @@ db.exec(`
 // 기존 DB에 컬럼 없으면 추가 (migration)
 try { db.exec('ALTER TABLE txs ADD COLUMN tx_type TEXT'); } catch (e) {}
 try { db.exec('ALTER TABLE txs ADD COLUMN tx_tag TEXT'); } catch (e) {}
+try { db.exec('ALTER TABLE txs ADD COLUMN from_age TEXT'); } catch (e) {}
+try { db.exec('ALTER TABLE txs ADD COLUMN to_age TEXT'); } catch (e) {}
 const dbCount = db.prepare('SELECT COUNT(*) AS c FROM txs').get().c;
 console.log(`[DB] SQLite at ${DB_PATH} — ${dbCount} rows`);
 
 // Prepared statements
 const stmtInsert = db.prepare(`
-  INSERT OR IGNORE INTO txs (ts, chain, sym, ca, amt, price, usd, supply_pct, ex_from, ex_to, addr_from, addr_to, hash, tx_type, tx_tag)
-  VALUES (@ts, @chain, @sym, @ca, @amt, @price, @usd, @supply_pct, @ex_from, @ex_to, @addr_from, @addr_to, @hash, @tx_type, @tx_tag)
+  INSERT OR IGNORE INTO txs (ts, chain, sym, ca, amt, price, usd, supply_pct, ex_from, ex_to, addr_from, addr_to, hash, tx_type, tx_tag, from_age, to_age)
+  VALUES (@ts, @chain, @sym, @ca, @amt, @price, @usd, @supply_pct, @ex_from, @ex_to, @addr_from, @addr_to, @hash, @tx_type, @tx_tag, @from_age, @to_age)
 `);
 const stmtRecent = db.prepare(`SELECT * FROM txs ORDER BY ts DESC LIMIT ?`);
 const stmtFilter = db.prepare(`
@@ -422,6 +428,53 @@ async function rpcCall(chain, method, params) {
   const d = await res.json();
   if (d.error) throw new Error(d.error.message);
   return d.result;
+}
+
+// ── 지갑 나이 조회 (Etherscan V2 + SQLite 캐시) ──
+db.exec(`
+  CREATE TABLE IF NOT EXISTS wallet_age (
+    chain_addr TEXT PRIMARY KEY,
+    first_ts INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+  )
+`);
+const stmtWalletGet = db.prepare('SELECT first_ts FROM wallet_age WHERE chain_addr = ?');
+const stmtWalletSet = db.prepare('INSERT OR REPLACE INTO wallet_age (chain_addr, first_ts, updated_at) VALUES (?, ?, ?)');
+
+async function getWalletAge(chain, addr) {
+  const key = `${chain}:${addr.toLowerCase()}`;
+
+  // 1. SQLite 캐시 (30일 TTL)
+  try {
+    const row = stmtWalletGet.get(key);
+    if (row && Date.now() - row.first_ts > 0) {
+      const days = Math.floor((Date.now() - row.first_ts) / 86400000);
+      return { days, firstTs: row.first_ts };
+    }
+  } catch (e) {}
+
+  // 2. Etherscan V2 API — 첫 번째 일반 TX 조회
+  const cid = CHAIN_ID[chain];
+  if (!cid) return null;
+  try {
+    const url = `https://api.etherscan.io/v2/api?chainid=${cid}&module=account&action=txlist&address=${addr}&startblock=0&endblock=99999999&page=1&offset=1&sort=asc&apikey=${ETH_KEY}`;
+    const r = await fetch(url, { signal: AbortSignal.timeout(8000) });
+    if (!r.ok) return null;
+    const d = await r.json();
+    if (d.status === '1' && d.result?.length > 0) {
+      const firstTs = parseInt(d.result[0].timeStamp) * 1000;
+      const days = Math.floor((Date.now() - firstTs) / 86400000);
+      try { stmtWalletSet.run(key, firstTs, Date.now()); } catch (e) {}
+      return { days, firstTs };
+    }
+  } catch (e) {}
+  return null;
+}
+
+function formatAge(age) {
+  if (!age) return '?d';
+  if (age.days >= 365) return Math.floor(age.days / 365) + 'y';
+  return age.days + 'd';
 }
 
 // ── LP 감지 DB (SQLite 영구 캐시) ──
@@ -813,8 +866,8 @@ function formatMessage(r) {
     `📦 수량: ${fN(r.amt)} ${r.sym}${supplyStr}\n` +
     `🔗 네트워크: ${CHAINS[r.chain].name}\n` +
     `🕐 ${new Date(r.ts).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' })}\n\n` +
-    `🏦 From: <code>${r.from}</code>${r.fromEx ? ' (' + r.fromEx + ')' : ''}\n` +
-    `👤 To: <code>${r.to}</code>${r.toEx ? ' (' + r.toEx + ')' : ''}\n\n` +
+    `🏦 From: <code>${r.from}</code>${r.fromEx ? ' (' + r.fromEx + ')' : ''} [${r.fromAge}]\n` +
+    `👤 To: <code>${r.to}</code>${r.toEx ? ' (' + r.toEx + ')' : ''} [${r.toAge}]\n\n` +
     `<a href="${CHAINS[r.chain].exp}/tx/${r.hash}">TX 보기</a> · ` +
     `<a href="${CHAINS[r.chain].exp}/token/${r.ca}">토큰</a>`;
 }
@@ -900,10 +953,17 @@ async function handleLog(chain, log_, source) {
     // 트랜잭션 유형 분류
     const txClass = classifyTxType(from, to, fromEx, toEx);
 
+    // 지갑 나이 조회 (병렬)
+    const [fromAge, toAge] = await Promise.all([
+      getWalletAge(chain, from).catch(() => null),
+      getWalletAge(chain, to).catch(() => null),
+    ]);
+
     state.stats.detected++;
     const r = {
       chain, sym: meta.symbol, ca, amt, price, usd,
       from, to, fromEx, toEx, hash, supplyPct,
+      fromAge: formatAge(fromAge), toAge: formatAge(toAge),
       tx_type: txClass.type,
       tx_label: txClass.label,
       tx_tag: txClass.tag,
@@ -919,6 +979,7 @@ async function handleLog(chain, log_, source) {
         ex_from: r.fromEx || null, ex_to: r.toEx || null,
         addr_from: r.from, addr_to: r.to, hash: r.hash,
         tx_type: r.tx_type || null, tx_tag: r.tx_tag || null,
+        from_age: r.fromAge || null, to_age: r.toAge || null,
       });
     } catch (e) { console.warn('db insert err:', e.message); }
 
@@ -1100,6 +1161,7 @@ const httpServer = http.createServer(async (req, res) => {
         from: row.addr_from, to: row.addr_to,
         fromEx: row.ex_from, toEx: row.ex_to, hash: row.hash,
         tx_type: row.tx_type, tx_tag: row.tx_tag,
+        fromAge: row.from_age, toAge: row.to_age,
       }));
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ ok: true, count: data.length, data }));
@@ -1492,6 +1554,7 @@ wss.on('connection', (clientWs, req) => {
       from: row.addr_from, to: row.addr_to,
       fromEx: row.ex_from, toEx: row.ex_to, hash: row.hash,
       tx_type: row.tx_type, tx_tag: row.tx_tag,
+      fromAge: row.from_age, toAge: row.to_age,
     }));
     const total = db.prepare('SELECT COUNT(*) AS c FROM txs').get().c;
     clientWs.send(JSON.stringify({
