@@ -724,7 +724,32 @@ async function buildCAList() {
   state.caListTs = Date.now();
   const total = Object.values(newCAList).reduce((s, a) => s + a.length, 0);
   log(`CA list 빌드 완료: ${total}개 (eth:${newCAList.eth.length} bsc:${newCAList.bsc.length} arb:${newCAList.arb.length} base:${newCAList.base.length} poly:${newCAList.poly.length})`);
+
+  // SQLite에 CA 리스트 캐시 (CoinGecko 실패 대비 폴백)
+  if (total > 0) {
+    try {
+      db.exec(`CREATE TABLE IF NOT EXISTS ca_cache (id INTEGER PRIMARY KEY CHECK(id=1), data TEXT, updated_at INTEGER)`);
+      db.prepare('INSERT OR REPLACE INTO ca_cache (id, data, updated_at) VALUES (1, ?, ?)').run(JSON.stringify(newCAList), Date.now());
+      log(`CA list DB 캐시 저장 완료 (${total}개)`);
+    } catch (e) { log('CA cache save err:', e.message); }
+  }
   return newCAList;
+}
+
+// CA 리스트 DB 폴백 로드
+function loadCACacheFromDB() {
+  try {
+    db.exec(`CREATE TABLE IF NOT EXISTS ca_cache (id INTEGER PRIMARY KEY CHECK(id=1), data TEXT, updated_at INTEGER)`);
+    const row = db.prepare('SELECT data, updated_at FROM ca_cache WHERE id = 1').get();
+    if (row && row.data) {
+      const cached = JSON.parse(row.data);
+      const total = Object.values(cached).reduce((s, a) => s + a.length, 0);
+      const ageH = ((Date.now() - row.updated_at) / 3600000).toFixed(1);
+      log(`CA list DB 폴백 로드: ${total}개 (${ageH}시간 전 저장)`);
+      return cached;
+    }
+  } catch (e) { log('CA cache load err:', e.message); }
+  return null;
 }
 
 // ── Binance whitelist ──
@@ -1505,16 +1530,39 @@ httpServer.listen(PORT, () => log(`HTTP+WS server on :${PORT}`));
   log(`MIN_USD=${MIN_USD}, chains=${Object.keys(CHAINS).join(',')}`);
   await loadBinanceWhitelist();
 
-  // CA 리스트 빌드 (CoinGecko top 1000 ∩ Binance)
+  // CA 리스트 빌드 (CoinGecko top 1000 ∩ Binance) — 실패 시 DB 폴백 + 재시도
   await buildCAList();
+  let totalCA = Object.values(state.caList).reduce((s, a) => s + a.length, 0);
+  if (totalCA === 0) {
+    log('CA 빌드 실패 — DB 폴백 시도');
+    const cached = loadCACacheFromDB();
+    if (cached) {
+      state.caList = cached;
+      totalCA = Object.values(cached).reduce((s, a) => s + a.length, 0);
+    }
+  }
+  if (totalCA === 0) {
+    log('CA 폴백도 없음 — 60초 후 재시도 예약');
+    setTimeout(async () => {
+      await buildCAList();
+      const t = Object.values(state.caList).reduce((s, a) => s + a.length, 0);
+      if (t > 0) {
+        log(`CA 재시도 성공 (${t}개) — WebSocket 연결 시작`);
+        for (const chain of Object.keys(CHAINS)) connectChainFull(chain);
+      } else {
+        log('CA 재시도도 실패 — 수동 확인 필요');
+      }
+    }, 60000);
+  }
   // 매일 1회 갱신
   setInterval(() => { buildCAList().catch(e => log('CA rebuild err:', e.message)); }, 86400 * 1000);
 
-  for (const chain of Object.keys(CHAINS)) {
-    connectChainFull(chain);
+  if (totalCA > 0) {
+    for (const chain of Object.keys(CHAINS)) {
+      connectChainFull(chain);
+    }
   }
 
-  const totalCA = Object.values(state.caList).reduce((s, a) => s + a.length, 0);
   await sendTelegram(
     `🚀 <b>Whale Worker 시작</b>\n` +
     `5체인 WebSocket 연결\n` +
