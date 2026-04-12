@@ -1086,7 +1086,7 @@ function setCors(res) {
   res.setHeader('Access-Control-Allow-Headers', '*');
 }
 
-const httpServer = http.createServer((req, res) => {
+const httpServer = http.createServer(async (req, res) => {
   setCors(res);
   if (req.method === 'OPTIONS') { res.writeHead(204); res.end(); return; }
 
@@ -1324,7 +1324,31 @@ const httpServer = http.createServer((req, res) => {
       });
 
       scored.sort((a, b) => b.score - a.score);
-      const top = scored.slice(0, 20);
+      const top = scored.slice(0, 30);
+
+      // FDV/MC 조회 (DexScreener, 병렬 — 최대 30건)
+      await Promise.all(top.map(async (t) => {
+        try {
+          const r = await fetch(`https://api.dexscreener.com/latest/dex/tokens/${t.ca}`,
+            { signal: AbortSignal.timeout(5000) });
+          if (!r.ok) return;
+          const d = await r.json();
+          const valid = (d.pairs || [])
+            .filter(p => p.priceUsd && parseFloat(p.priceUsd) > 0 && (p.liquidity?.usd || 0) >= 1000);
+          if (!valid.length) return;
+          valid.sort((a, b) => (b.liquidity?.usd || 0) - (a.liquidity?.usd || 0));
+          const best = valid[0];
+          t.fdv = best.fdv || 0;
+          t.mc = best.marketCap || best.fdv || 0;
+          t.liq = best.liquidity?.usd || 0;
+          t.price = parseFloat(best.priceUsd) || 0;
+          // 저시총 라벨
+          if (t.mc > 0 && t.mc < 10e6) t.mcLabel = 'MICRO';       // <$10M
+          else if (t.mc > 0 && t.mc < 50e6) t.mcLabel = 'SMALL';   // <$50M
+          else if (t.mc > 0 && t.mc < 200e6) t.mcLabel = 'MID';
+          else t.mcLabel = '';
+        } catch (e) {}
+      }));
 
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ ok: true, count: top.length, data: top }));
