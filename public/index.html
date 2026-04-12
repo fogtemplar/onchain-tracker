@@ -1679,53 +1679,63 @@ window.addEventListener('DOMContentLoaded', function(){
     </div>
   </div>
 
+  <!-- 호환용 hidden (레거시 함수 참조 방지) -->
+  <div style="display:none;">
+    <input type="checkbox" class="whaleChain" value="bsc" checked>
+    <input type="checkbox" class="whaleChain" value="eth" checked>
+    <input type="checkbox" class="whaleChain" value="arb">
+    <input type="checkbox" class="whaleChain" value="base">
+    <input type="checkbox" class="whaleChain" value="poly">
+    <input id="whaleMinUsd" type="number" value="100000">
+    <select id="whaleInterval"><option value="120" selected>2</option></select>
+    <input type="checkbox" id="whaleBnbOnly" checked>
+    <span id="whaleBnbCount"></span>
+    <input type="radio" name="whaleMode" value="cex">
+    <input type="radio" name="whaleMode" value="all">
+    <span id="whaleCAcount"></span>
+    <button id="whaleStartBtn"></button>
+    <span id="whaleLast"></span>
+    <span id="whaleNext"></span>
+    <span id="whaleScanned">0</span>
+  </div>
+
   <!-- ═ 실시간 (아래) ═ -->
-  <div style="padding:14px 20px;background:#c0c0c0;border-bottom:1px solid #808080;">
-    <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:10px;">
-      <div style="font-size:14px;font-weight:bold;color:#000;">🐋 100K+ 전송 상시 트래킹</div>
-      <span id="whaleStatus" style="font-size:11px;color:#404040;">대기 중</span>
+  <div style="padding:10px 20px;background:#c0c0c0;border-bottom:1px solid #808080;">
+    <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+      <div style="font-size:13px;font-weight:bold;color:#000;">🐋 실시간 전송</div>
+      <span id="whaleStatus" style="font-size:11px;color:#404040;">Railway 연결 중...</span>
+      <span style="font-size:11px;color:#000;">총 <b id="whaleTotal">0</b>건</span>
       <div style="margin-left:auto;display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
-        <label style="font-size:11px;color:#000;">체인:</label>
-        <label style="font-size:11px;"><input type="checkbox" class="whaleChain" value="bsc" checked> BSC</label>
-        <label style="font-size:11px;"><input type="checkbox" class="whaleChain" value="eth" checked> ETH</label>
-        <label style="font-size:11px;"><input type="checkbox" class="whaleChain" value="arb"> ARB</label>
-        <label style="font-size:11px;"><input type="checkbox" class="whaleChain" value="base"> BASE</label>
-        <label style="font-size:11px;"><input type="checkbox" class="whaleChain" value="poly"> POLY</label>
-        <label style="font-size:11px;color:#000;margin-left:8px;">최소 USD:</label>
-        <input id="whaleMinUsd" type="number" value="100000" style="width:90px;font-size:11px;">
-        <label style="font-size:11px;color:#000;margin-left:8px;">간격:</label>
-        <select id="whaleInterval" style="font-size:11px;">
-          <option value="30">30초</option>
-          <option value="60">1분</option>
-          <option value="120" selected>2분</option>
-          <option value="300">5분</option>
+        <!-- 필터 -->
+        <label style="font-size:10px;color:#000;">체인:</label>
+        <select id="whaleFilterChain" onchange="whaleApplyFilter()" style="font-size:10px;">
+          <option value="">전체</option>
+          <option value="eth">ETH</option>
+          <option value="bsc">BSC</option>
+          <option value="arb">ARB</option>
+          <option value="base">BASE</option>
+          <option value="poly">POLY</option>
         </select>
-        <label style="font-size:11px;color:#000;margin-left:8px;display:flex;align-items:center;gap:4px;">
-          <input type="checkbox" id="whaleBnbOnly" checked>
-          <span>Binance 상장만</span>
-          <span id="whaleBnbCount" style="color:#000080;font-weight:bold;">(0)</span>
-        </label>
-        <label style="font-size:11px;color:#000;margin-left:8px;display:flex;align-items:center;gap:4px;">
-          <input type="radio" name="whaleMode" value="cex" checked onchange="WHALE.scanMode='cex'">
-          <span>거래소 출금만</span>
-        </label>
-        <label style="font-size:11px;color:#000;display:flex;align-items:center;gap:4px;">
-          <input type="radio" name="whaleMode" value="all" onchange="WHALE.scanMode='all'">
-          <span>전체 전송 (EOA↔EOA 포함)</span>
-          <span id="whaleCAcount" style="color:#800000;font-weight:bold;">(0개 토큰)</span>
-        </label>
-        <button id="whaleStartBtn" onclick="whaleToggle()" style="font-weight:bold;color:#008000;">▶ 시작</button>
-        <button onclick="whaleRefreshBnb()">🔄 Binance 갱신</button>
-        <button onclick="whaleBuildCAList()">📥 CA 매핑 빌드</button>
-        <button onclick="whaleSetRailwayUrl()">🛤 Railway 연결</button>
-        <button onclick="whaleClear()">🗑 비우기</button>
+        <label style="font-size:10px;color:#000;">유형:</label>
+        <select id="whaleFilterType" onchange="whaleApplyFilter()" style="font-size:10px;">
+          <option value="">전체</option>
+          <option value="cex_out">거래소출금</option>
+          <option value="cex_in">거래소입금</option>
+          <option value="dex_swap">DEX스왑</option>
+          <option value="bridge">브리지</option>
+          <option value="p2p">개인이체</option>
+        </select>
+        <label style="font-size:10px;color:#000;">토큰:</label>
+        <input id="whaleFilterSym" oninput="whaleApplyFilter()" placeholder="MOVE..." style="font-size:10px;width:60px;">
+        <label style="font-size:10px;color:#000;">정렬:</label>
+        <select id="whaleSort" onchange="whaleApplyFilter()" style="font-size:10px;">
+          <option value="ts">최신순</option>
+          <option value="usd">USD순</option>
+          <option value="amt">수량순</option>
+          <option value="supplyPct">공급%순</option>
+        </select>
+        <span id="whaleFilterCount" style="font-size:10px;color:#404040;"></span>
       </div>
-    </div>
-    <div id="whaleStats" style="display:flex;gap:14px;font-size:11px;color:#000;">
-      <span>총 감지: <b id="whaleTotal">0</b></span>
-      <span>최근 폴링: <b id="whaleLast">—</b></span>
-      <span>다음 폴링: <b id="whaleNext">—</b></span>
-      <span>스캔된 거래소: <b id="whaleScanned">0</b></span>
     </div>
   </div>
   <div style="overflow-x:auto;">
@@ -2675,15 +2685,42 @@ function whaleTypeBadge(r){
   return '<span style="background:#404040;color:#fff;padding:1px 6px;font-size:10px;font-weight:bold;">👤 개인이체</span>';
 }
 
+function whaleApplyFilter(){
+  whaleRender();
+}
+
+function whaleGetFiltered(){
+  var chainF = (document.getElementById('whaleFilterChain')||{}).value || '';
+  var typeF = (document.getElementById('whaleFilterType')||{}).value || '';
+  var symF = ((document.getElementById('whaleFilterSym')||{}).value || '').toUpperCase().trim();
+  var sortF = (document.getElementById('whaleSort')||{}).value || 'ts';
+
+  var arr = WHALE.rows.slice();
+  if(chainF) arr = arr.filter(function(r){return r.chain === chainF;});
+  if(typeF) arr = arr.filter(function(r){return r.tx_type === typeF;});
+  if(symF) arr = arr.filter(function(r){return (r.sym||'').indexOf(symF) >= 0;});
+
+  arr.sort(function(a,b){
+    if(sortF === 'usd') return (b.usd||0) - (a.usd||0);
+    if(sortF === 'amt') return (b.amt||0) - (a.amt||0);
+    if(sortF === 'supplyPct') return (b.supplyPct||0) - (a.supplyPct||0);
+    return (b.ts||0) - (a.ts||0);
+  });
+  return arr;
+}
+
 function whaleRender(){
   var body = document.getElementById('whaleBody');
   if(!body) return;
-  if(!WHALE.rows.length){
-    body.innerHTML = '<tr><td colspan="10" style="padding:30px;text-align:center;color:#404040;">감지된 트랜잭션 없음</td></tr>';
+  var filtered = whaleGetFiltered();
+  var countEl = document.getElementById('whaleFilterCount');
+  if(countEl) countEl.textContent = filtered.length + '/' + WHALE.rows.length + '건';
+  if(!filtered.length){
+    body.innerHTML = '<tr><td colspan="10" style="padding:30px;text-align:center;color:#404040;">'+(WHALE.rows.length?'필터 결과 없음':'감지된 트랜잭션 없음')+'</td></tr>';
     return;
   }
   var chainColor = {eth:'#627eea',bsc:'#f0b90b',arb:'#28a0f0',base:'#0052ff',poly:'#8247e5'};
-  body.innerHTML = WHALE.rows.map(function(r){
+  body.innerHTML = filtered.map(function(r){
     var exp = CHAIN_EXP[r.chain]||'';
     var ago = tAgo(r.ts/1000);
     var pctStr = r.supplyPct > 0 ? r.supplyPct.toFixed(2)+'%' : '—';
