@@ -22,13 +22,13 @@ const CG_API_KEY  = process.env.CG_API_KEY  || 'b745429f379948b8b715f6beded5c2ea
 const ETH_KEY     = process.env.ETHERSCAN_KEY || 'MFC6RKPAYYCWID4YEH9ZM7FJWTZPY9HM4Z';
 
 // ── Chain config ──
-// WebSocket: Alchemy (실시간 구독 필수) / HTTP: 무료 PublicNode 우선 → Alchemy CU 절약
+// WebSocket + HTTP: PublicNode 무료 → Alchemy CU 0
 const CHAINS = {
-  bsc:  { wss: 'wss://bsc-rpc.publicnode.com',                          http: 'https://bsc-rpc.publicnode.com',                          name: 'BSC',  exp: 'https://bscscan.com' },
-  eth:  { wss: `wss://eth-mainnet.g.alchemy.com/v2/${ALCHEMY_KEY}`,     http: 'https://ethereum-rpc.publicnode.com',                     name: 'ETH',  exp: 'https://etherscan.io' },
-  arb:  { wss: `wss://arb-mainnet.g.alchemy.com/v2/${ALCHEMY_KEY}`,     http: 'https://arbitrum-one-rpc.publicnode.com',                 name: 'ARB',  exp: 'https://arbiscan.io' },
-  base: { wss: `wss://base-mainnet.g.alchemy.com/v2/${ALCHEMY_KEY}`,    http: 'https://base-rpc.publicnode.com',                         name: 'BASE', exp: 'https://basescan.org' },
-  poly: { wss: `wss://polygon-mainnet.g.alchemy.com/v2/${ALCHEMY_KEY}`, http: 'https://polygon-bor-rpc.publicnode.com',                  name: 'POLY', exp: 'https://polygonscan.com' },
+  bsc:  { wss: 'wss://bsc-rpc.publicnode.com',            http: 'https://bsc-rpc.publicnode.com',            name: 'BSC',  exp: 'https://bscscan.com' },
+  eth:  { wss: 'wss://ethereum-rpc.publicnode.com',        http: 'https://ethereum-rpc.publicnode.com',        name: 'ETH',  exp: 'https://etherscan.io' },
+  arb:  { wss: 'wss://arbitrum-one-rpc.publicnode.com',    http: 'https://arbitrum-one-rpc.publicnode.com',    name: 'ARB',  exp: 'https://arbiscan.io' },
+  base: { wss: 'wss://base-rpc.publicnode.com',            http: 'https://base-rpc.publicnode.com',            name: 'BASE', exp: 'https://basescan.org' },
+  poly: { wss: 'wss://polygon-bor-rpc.publicnode.com',     http: 'https://polygon-bor-rpc.publicnode.com',     name: 'POLY', exp: 'https://polygonscan.com' },
 };
 
 const TRANSFER_TOPIC = '0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef';
