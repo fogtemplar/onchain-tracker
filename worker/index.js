@@ -19,13 +19,13 @@ const CMC_KEY     = process.env.CMC_KEY     || '7c23a703-55ff-4b19-babd-a4cf83aa
 const CG_API_KEY  = process.env.CG_API_KEY  || 'b745429f379948b8b715f6beded5c2ea';
 
 // ── Chain config ──
-// BSC: Alchemy가 logs 구독 거부 → PublicNode 무료 WebSocket 사용
+// WebSocket: Alchemy (실시간 구독 필수) / HTTP: 무료 PublicNode 우선 → Alchemy CU 절약
 const CHAINS = {
-  bsc:  { wss: 'wss://bsc-rpc.publicnode.com',                          http: `https://bnb-mainnet.g.alchemy.com/v2/${ALCHEMY_KEY}`,     name: 'BSC',  exp: 'https://bscscan.com' },
-  eth:  { wss: `wss://eth-mainnet.g.alchemy.com/v2/${ALCHEMY_KEY}`,     http: `https://eth-mainnet.g.alchemy.com/v2/${ALCHEMY_KEY}`,     name: 'ETH',  exp: 'https://etherscan.io' },
-  arb:  { wss: `wss://arb-mainnet.g.alchemy.com/v2/${ALCHEMY_KEY}`,     http: `https://arb-mainnet.g.alchemy.com/v2/${ALCHEMY_KEY}`,     name: 'ARB',  exp: 'https://arbiscan.io' },
-  base: { wss: `wss://base-mainnet.g.alchemy.com/v2/${ALCHEMY_KEY}`,    http: `https://base-mainnet.g.alchemy.com/v2/${ALCHEMY_KEY}`,    name: 'BASE', exp: 'https://basescan.org' },
-  poly: { wss: `wss://polygon-mainnet.g.alchemy.com/v2/${ALCHEMY_KEY}`, http: `https://polygon-mainnet.g.alchemy.com/v2/${ALCHEMY_KEY}`, name: 'POLY', exp: 'https://polygonscan.com' },
+  bsc:  { wss: 'wss://bsc-rpc.publicnode.com',                          http: 'https://bsc-rpc.publicnode.com',                          name: 'BSC',  exp: 'https://bscscan.com' },
+  eth:  { wss: `wss://eth-mainnet.g.alchemy.com/v2/${ALCHEMY_KEY}`,     http: 'https://ethereum-rpc.publicnode.com',                     name: 'ETH',  exp: 'https://etherscan.io' },
+  arb:  { wss: `wss://arb-mainnet.g.alchemy.com/v2/${ALCHEMY_KEY}`,     http: 'https://arbitrum-one-rpc.publicnode.com',                 name: 'ARB',  exp: 'https://arbiscan.io' },
+  base: { wss: `wss://base-mainnet.g.alchemy.com/v2/${ALCHEMY_KEY}`,    http: 'https://base-rpc.publicnode.com',                         name: 'BASE', exp: 'https://basescan.org' },
+  poly: { wss: `wss://polygon-mainnet.g.alchemy.com/v2/${ALCHEMY_KEY}`, http: 'https://polygon-bor-rpc.publicnode.com',                  name: 'POLY', exp: 'https://polygonscan.com' },
 };
 
 const TRANSFER_TOPIC = '0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef';
@@ -351,9 +351,8 @@ function classifyTxType(from, to, fromEx, toEx) {
 
 // ── State ──
 const state = {
-  ws: {},                    // chain → WebSocket (cex 전용)
   wsFull: {},                // chain → WebSocket (full 모드)
-  reconnect: {},
+
   priceCache: new Map(),
   metaCache: new Map(),
   binanceWL: null,
@@ -367,9 +366,6 @@ const state = {
   lpAddresses: new Set(),    // 동적으로 감지된 LP/pair (handleLog에서 제외)
 };
 
-// SCAN_MODE: 'cex' | 'full'  (env로 토글)
-const SCAN_MODE = (process.env.SCAN_MODE || 'full').toLowerCase();
-console.log(`[CONFIG] SCAN_MODE=${SCAN_MODE}`);
 
 // ── Util ──
 function log(...args) { console.log(`[${new Date().toISOString()}]`, ...args); }
@@ -378,9 +374,6 @@ function fN(n) {
   if (n >= 1e6) return (n / 1e6).toFixed(2) + 'M';
   if (n >= 1e3) return (n / 1e3).toFixed(1) + 'K';
   return n.toFixed(0);
-}
-function addrToTopic(addr) {
-  return '0x' + '0'.repeat(24) + addr.toLowerCase().replace(/^0x/, '');
 }
 function abiDecodeString(hex) {
   if (!hex || hex === '0x') return '';
@@ -404,13 +397,28 @@ function abiDecodeString(hex) {
   } catch (e) { return ''; }
 }
 
-// ── Alchemy HTTP RPC ──
+// ── HTTP RPC (PublicNode 우선 → Alchemy 폴백) ──
+const ALCHEMY_HTTP = {
+  bsc:  `https://bnb-mainnet.g.alchemy.com/v2/${ALCHEMY_KEY}`,
+  eth:  `https://eth-mainnet.g.alchemy.com/v2/${ALCHEMY_KEY}`,
+  arb:  `https://arb-mainnet.g.alchemy.com/v2/${ALCHEMY_KEY}`,
+  base: `https://base-mainnet.g.alchemy.com/v2/${ALCHEMY_KEY}`,
+  poly: `https://polygon-mainnet.g.alchemy.com/v2/${ALCHEMY_KEY}`,
+};
+
 async function rpcCall(chain, method, params) {
-  const res = await fetch(CHAINS[chain].http, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ jsonrpc: '2.0', method, params, id: 1 }),
-  });
+  const body = JSON.stringify({ jsonrpc: '2.0', method, params, id: 1 });
+  const opts = { method: 'POST', headers: { 'Content-Type': 'application/json' }, body, signal: AbortSignal.timeout(8000) };
+
+  // 1차: PublicNode (무료)
+  try {
+    const res = await fetch(CHAINS[chain].http, opts);
+    const d = await res.json();
+    if (!d.error) return d.result;
+  } catch (e) {}
+
+  // 2차: Alchemy 폴백 (CU 소비)
+  const res = await fetch(ALCHEMY_HTTP[chain], { ...opts, signal: AbortSignal.timeout(8000) });
   const d = await res.json();
   if (d.error) throw new Error(d.error.message);
   return d.result;
@@ -995,89 +1003,6 @@ function connectChainFull(chain) {
   }, 30000);
 }
 
-// ── WebSocket connection ──
-function connectChain(chain) {
-  const cfg = CHAINS[chain];
-  log(`[${chain}] WebSocket 연결 중... ${cfg.wss.replace(ALCHEMY_KEY, '***')}`);
-  const ws = new WebSocket(cfg.wss);
-  state.ws[chain] = ws;
-
-  // BSC는 거래소 OR 필터를 일정 개수 이상이면 거부 → topic0만 구독, 클라이언트에서 from 매칭
-  // 다른 체인은 한 번에 array로 가능
-  const isBsc = chain === 'bsc';
-  const subIds = new Set();
-
-  ws.on('open', () => {
-    log(`[${chain}] ✓ 연결됨`);
-    const exchangeAddrs = EXCHANGES[chain] || [];
-
-    if (isBsc) {
-      // BSC: PublicNode 순차 구독 (rate limit 방지)
-      (async () => {
-        for (let idx = 0; idx < exchangeAddrs.length; idx++) {
-          const ex = exchangeAddrs[idx];
-          ws.send(JSON.stringify({
-            jsonrpc: '2.0',
-            method: 'eth_subscribe',
-            params: ['logs', { topics: [TRANSFER_TOPIC, addrToTopic(ex.addr)] }],
-            id: 1000 + idx,
-          }));
-          await new Promise(r => setTimeout(r, 200));
-        }
-      })();
-    } else {
-      // 일반: 한 번에 array
-      const addrTopics = exchangeAddrs.map(e => addrToTopic(e.addr));
-      ws.send(JSON.stringify({
-        jsonrpc: '2.0',
-        method: 'eth_subscribe',
-        params: ['logs', { topics: [TRANSFER_TOPIC, addrTopics] }],
-        id: 1,
-      }));
-    }
-  });
-
-  ws.on('message', async (data) => {
-    try {
-      const msg = JSON.parse(data.toString());
-      // 구독 응답
-      if (msg.id != null && msg.result) {
-        subIds.add(msg.result);
-        if (isBsc) {
-          // 각 응답 즉시 로깅
-          log(`[${chain}] sub ok id=${msg.id} (${subIds.size}/${(EXCHANGES[chain] || []).length})`);
-        } else {
-          log(`[${chain}] ✓ 구독 시작 (${(EXCHANGES[chain] || []).length}개 거래소, 1개 sub)`);
-        }
-        return;
-      }
-      if (msg.id != null && msg.error) {
-        log(`[${chain}] ❌ 구독 실패 (id=${msg.id}):`, msg.error.message);
-        return;
-      }
-      if (msg.method === 'eth_subscription' && msg.params?.result) {
-        await handleLog(chain, msg.params.result, 'cex');
-      }
-    } catch (e) { log(`[${chain}] msg parse err:`, e.message); }
-  });
-
-  ws.on('error', (err) => log(`[${chain}] ws error:`, err.message));
-
-  ws.on('close', () => {
-    log(`[${chain}] 🔴 연결 끊김 — 5초 후 재연결...`);
-    delete state.ws[chain];
-    state.reconnect[chain] = setTimeout(() => connectChain(chain), 5000);
-  });
-
-  // Keepalive ping (30초)
-  const pingTimer = setInterval(() => {
-    if (ws.readyState === WebSocket.OPEN) {
-      try { ws.ping(); } catch (e) {}
-    } else {
-      clearInterval(pingTimer);
-    }
-  }, 30000);
-}
 
 // ── HTTP server (헬스체크 + 최근 트랜잭션 + WebSocket 업그레이드) ──
 function setCors(res) {
@@ -1099,7 +1024,7 @@ const httpServer = http.createServer(async (req, res) => {
     res.end(JSON.stringify({
       ok: true,
       uptime_sec: uptime,
-      mode: SCAN_MODE,
+      mode: 'full',
       min_usd: MIN_USD,
       detected: state.stats.detected,
       sent: state.stats.sent,
@@ -1109,7 +1034,6 @@ const httpServer = http.createServer(async (req, res) => {
       db_total: dbTotal,
       db_path: DB_PATH,
       chains: {
-        cex: Object.keys(state.ws).map(c => ({ chain: c, connected: state.ws[c]?.readyState === WebSocket.OPEN })),
         full: Object.keys(state.wsFull).map(c => ({ chain: c, connected: state.wsFull[c]?.readyState === WebSocket.OPEN, ca_count: state.caList[c]?.length || 0 })),
       },
       ca_total: totalCA,
@@ -1578,35 +1502,24 @@ httpServer.listen(PORT, () => log(`HTTP+WS server on :${PORT}`));
 // ── Boot ──
 (async () => {
   log('🐋 Onchain Whale Worker starting...');
-  log(`MIN_USD=${MIN_USD}, chains=${Object.keys(CHAINS).join(',')}, mode=${SCAN_MODE}`);
+  log(`MIN_USD=${MIN_USD}, chains=${Object.keys(CHAINS).join(',')}`);
   await loadBinanceWhitelist();
 
-  if (SCAN_MODE === 'full' || SCAN_MODE === 'both') {
-    // CA 리스트 빌드 (CoinGecko top 1000 ∩ Binance)
-    await buildCAList();
-    // 매일 1회 갱신
-    setInterval(() => { buildCAList().catch(e => log('CA rebuild err:', e.message)); }, 86400 * 1000);
-  }
+  // CA 리스트 빌드 (CoinGecko top 1000 ∩ Binance)
+  await buildCAList();
+  // 매일 1회 갱신
+  setInterval(() => { buildCAList().catch(e => log('CA rebuild err:', e.message)); }, 86400 * 1000);
 
-  if (SCAN_MODE === 'cex' || SCAN_MODE === 'both') {
-    for (const chain of Object.keys(CHAINS)) {
-      connectChain(chain);
-    }
-  }
-
-  if (SCAN_MODE === 'full' || SCAN_MODE === 'both') {
-    for (const chain of Object.keys(CHAINS)) {
-      connectChainFull(chain);
-    }
+  for (const chain of Object.keys(CHAINS)) {
+    connectChainFull(chain);
   }
 
   const totalCA = Object.values(state.caList).reduce((s, a) => s + a.length, 0);
   await sendTelegram(
     `🚀 <b>Whale Worker 시작</b>\n` +
-    `모드: ${SCAN_MODE.toUpperCase()}\n` +
     `5체인 WebSocket 연결\n` +
     `임계값: $${fN(MIN_USD)}+\n` +
-    (SCAN_MODE !== 'cex' ? `구독 토큰: ${totalCA}개 CA\n` : '') +
+    `구독 토큰: ${totalCA}개 CA\n` +
     `DEX/Bridge ${DEX_BLACKLIST.size}개 블랙리스트`
   );
 })();
@@ -1614,7 +1527,6 @@ httpServer.listen(PORT, () => log(`HTTP+WS server on :${PORT}`));
 // Graceful shutdown
 process.on('SIGTERM', () => {
   log('SIGTERM 받음 — 종료');
-  Object.values(state.ws).forEach(ws => { try { ws.close(); } catch (e) {} });
   Object.values(state.wsFull).forEach(ws => { try { ws.close(); } catch (e) {} });
   try { db.close(); } catch (e) {}
   process.exit(0);
