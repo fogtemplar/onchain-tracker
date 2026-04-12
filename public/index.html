@@ -2719,7 +2719,11 @@ function whaleTypeBadge(r){
       cex_out:'#000080', cex_in:'#008000', cex_int:'#808000',
       dex_swap:'#800080', bridge:'#0080a0', lp:'#a05000', p2p:'#404040'
     }[r.tx_type] || '#404040';
-    var label = r.tx_label || r.tx_type;
+    var labelMap = {
+      cex_out:'거래소출금', cex_in:'거래소입금', cex_int:'거래소내부',
+      dex_swap:'DEX스왑', bridge:'브리지', lp:'LP', p2p:'개인이체'
+    };
+    var label = labelMap[r.tx_type] || r.tx_label || r.tx_type;
     return '<span style="background:'+col+';color:#fff;padding:1px 6px;font-size:10px;font-weight:bold;white-space:nowrap;">'+label+'</span>'+
       (r.tx_tag ? '<div style="font-size:9px;color:#404040;margin-top:2px;">'+r.tx_tag+'</div>' : '');
   }
