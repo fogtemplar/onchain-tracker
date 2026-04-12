@@ -1633,11 +1633,11 @@ window.addEventListener('DOMContentLoaded', function(){
     </div>
   </div>
 
-  <!-- 이상 신호 섹션 -->
-  <div style="padding:8px 20px;background:#c0c0c0;border-bottom:2px solid #404040;">
-    <div style="font-size:11px;font-weight:bold;color:#800000;margin-bottom:4px;">🚨 이상 신호</div>
-    <div id="anomalyList" style="font-size:11px;color:#000;">
-      <span style="color:#404040;">로딩 중...</span>
+  <!-- 🔥 주목 코인 Top 20 -->
+  <div style="padding:10px 20px;background:#c0c0c0;border-bottom:2px solid #404040;">
+    <div style="font-size:12px;font-weight:bold;color:#800000;margin-bottom:8px;">🔥 주목 코인 Top 20 <span id="watchlistStatus" style="font-size:10px;color:#404040;font-weight:normal;margin-left:8px;">로딩 중...</span></div>
+    <div id="watchlistGrid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:6px;">
+      <span style="color:#404040;font-size:11px;">데이터 수집 중...</span>
     </div>
   </div>
 
@@ -1844,45 +1844,64 @@ function analyticsRenderFreq(){
   }).join('');
 }
 
-async function analyticsLoadAnomalies(){
+async function analyticsLoadWatchlist(){
   var base = analyticsHttpBase();
   if(!base) return;
   try {
-    var r = await fetch(base+'/analytics/anomalies', {signal: AbortSignal.timeout(20000)});
+    var r = await fetch(base+'/analytics/watchlist', {signal: AbortSignal.timeout(20000)});
     var d = await r.json();
     if(d.ok){
-      ANALYTICS.anomalies = d.data;
-      analyticsRenderAnomalies();
-      var nb = document.getElementById('wsubAnomBadge');
+      ANALYTICS.watchlist = d.data;
+      analyticsRenderWatchlist();
+      var nb = document.getElementById('nbWhaleCount');
       if(nb) nb.textContent = d.count;
+      var st = document.getElementById('watchlistStatus');
+      if(st) st.textContent = d.count+'개 토큰';
     }
-  } catch(e){ console.warn('anomalies err:', e); }
+  } catch(e){ console.warn('watchlist err:', e); }
 }
 
-function analyticsRenderAnomalies(){
-  var arr = ANALYTICS.anomalies;
-  var el = document.getElementById('anomalyList');
+function analyticsRenderWatchlist(){
+  var arr = ANALYTICS.watchlist || [];
+  var el = document.getElementById('watchlistGrid');
   if(!el) return;
   if(!arr.length){
-    el.innerHTML = '<span style="color:#404040;">감지된 이상 신호 없음</span>';
+    el.innerHTML = '<span style="color:#404040;font-size:11px;">데이터 부족 (DB 쌓이는 중)</span>';
     return;
   }
-  arr.sort(function(a,b){
-    if(a.severity !== b.severity) return a.severity==='high' ? -1 : 1;
-    return (b.total_usd||0) - (a.total_usd||0);
-  });
-  var icons = {spike:'🌋', mega:'🐋', cluster:'🔁', newcomer:'🎯', accumulator:'📈'};
-  el.innerHTML = arr.map(function(a){
-    var icon = icons[a.type] || '⚡';
-    var col = a.severity==='high' ? '#800000' : '#000';
-    var usd = a.total_usd ? ' $'+fN(a.total_usd) : '';
-    return '<span style="color:'+col+';margin-right:14px;white-space:nowrap;">'+icon+' '+a.title+' — '+a.desc+usd+'</span>';
+  var chainColor = {eth:'#627eea',bsc:'#f0b90b',arb:'#28a0f0',base:'#0052ff',poly:'#8247e5'};
+  el.innerHTML = arr.map(function(w, i){
+    var scoreColor = w.score >= 70 ? '#800000' : w.score >= 40 ? '#808000' : '#000080';
+    var barW = Math.min(100, w.score);
+    var newBadge = w.is_new ? '<span style="background:#800000;color:#fff;padding:0 4px;font-size:8px;font-weight:bold;margin-left:4px;">NEW</span>' : '';
+    var ago = w.last_ts ? tAgo(w.last_ts/1000) : '—';
+    return '<div style="background:#fff;box-shadow:inset 1px 1px 0 #808080,inset -1px -1px 0 #fff;padding:8px 10px;">'+
+      '<div style="display:flex;align-items:center;gap:4px;margin-bottom:4px;">'+
+        '<span style="font-size:10px;color:#404040;min-width:18px;">#'+(i+1)+'</span>'+
+        '<span style="font-size:13px;font-weight:bold;color:#000;">'+w.sym+'</span>'+
+        '<span style="font-size:9px;color:'+(chainColor[w.chain]||'#000')+';font-weight:bold;">'+w.chain.toUpperCase()+'</span>'+
+        newBadge+
+        '<span style="margin-left:auto;font-size:14px;font-weight:900;color:'+scoreColor+';">'+w.score+'</span>'+
+      '</div>'+
+      '<div style="height:3px;background:#dfdfdf;margin-bottom:5px;"><div style="height:100%;width:'+barW+'%;background:'+scoreColor+';"></div></div>'+
+      '<div style="display:grid;grid-template-columns:1fr 1fr;gap:2px;font-size:9px;color:#404040;">'+
+        '<span>24h: <b style="color:#000;">'+w.cnt_24h+'건</b></span>'+
+        '<span>7d: <b style="color:#000;">'+w.cnt_7d+'건</b></span>'+
+        '<span>24h USD: <b style="color:#000080;">$'+fN(w.usd_24h||0)+'</b></span>'+
+        '<span>최대: <b style="color:#800000;">$'+fN(w.max_usd||0)+'</b></span>'+
+        '<span>수신자: <b>'+w.unique_receivers+'</b></span>'+
+        '<span>최근: <b>'+ago+'</b></span>'+
+      '</div>'+
+    '</div>';
   }).join('');
 }
 
+// 하위 호환
+var analyticsLoadAnomalies = analyticsLoadWatchlist;
+
 function analyticsRefresh(){
   analyticsLoadFreq(ANALYTICS.freqDays);
-  analyticsLoadAnomalies();
+  analyticsLoadWatchlist();
 }
 
 function analyticsTokenDetail(sym, chain){

@@ -1230,6 +1230,111 @@ const httpServer = http.createServer((req, res) => {
     return;
   }
 
+  // /analytics/watchlist → 주목 코인 Top 20 (복합 점수)
+  if (req.url?.startsWith('/analytics/watchlist')) {
+    try {
+      const now = Date.now();
+
+      // 7일 기준 토큰별 집계
+      const rows = db.prepare(`
+        SELECT
+          sym, chain, ca,
+          COUNT(*) AS cnt_7d,
+          SUM(usd) AS total_usd_7d,
+          AVG(usd) AS avg_usd,
+          MAX(usd) AS max_usd,
+          COUNT(DISTINCT addr_to) AS unique_receivers,
+          COUNT(DISTINCT addr_from) AS unique_senders,
+          MAX(ts) AS last_ts,
+          MIN(ts) AS first_ts
+        FROM txs
+        WHERE ts >= ?
+        GROUP BY sym, chain
+      `).all(now - 7 * 86400000);
+
+      // 24h 집계 (서브쿼리)
+      const h24Map = {};
+      const h24rows = db.prepare(`
+        SELECT sym, chain, COUNT(*) AS cnt_24h, SUM(usd) AS usd_24h
+        FROM txs WHERE ts >= ?
+        GROUP BY sym, chain
+      `).all(now - 86400000);
+      h24rows.forEach(r => { h24Map[r.sym + ':' + r.chain] = r; });
+
+      // 1h 집계 (급등 감지)
+      const h1Map = {};
+      const h1rows = db.prepare(`
+        SELECT sym, chain, COUNT(*) AS cnt_1h
+        FROM txs WHERE ts >= ?
+        GROUP BY sym, chain
+      `).all(now - 3600000);
+      h1rows.forEach(r => { h1Map[r.sym + ':' + r.chain] = r; });
+
+      // 신규 여부 (3일 이내 첫 등장)
+      const newTokens = new Set();
+      db.prepare(`
+        SELECT sym, chain FROM txs
+        GROUP BY sym, chain
+        HAVING MIN(ts) >= ?
+      `).all(now - 3 * 86400000).forEach(r => newTokens.add(r.sym + ':' + r.chain));
+
+      // 복합 점수 계산
+      const scored = rows.map(r => {
+        const key = r.sym + ':' + r.chain;
+        const h24 = h24Map[key] || { cnt_24h: 0, usd_24h: 0 };
+        const h1 = h1Map[key] || { cnt_1h: 0 };
+        const isNew = newTokens.has(key);
+        const avgDaily = r.cnt_7d / 7;
+
+        // 점수 요소 (0~100)
+        let score = 0;
+
+        // 1. 빈도 (최대 25점) — 24h 횟수
+        score += Math.min(25, h24.cnt_24h * 2.5);
+
+        // 2. 금액 (최대 25점) — 24h 총 USD (로그 스케일)
+        if (h24.usd_24h > 0) score += Math.min(25, Math.log10(h24.usd_24h / 10000) * 5);
+
+        // 3. 급등 (최대 20점) — 1시간 횟수 vs 7일 평균
+        if (avgDaily > 0 && h1.cnt_1h > avgDaily * 0.5) {
+          score += Math.min(20, (h1.cnt_1h / avgDaily) * 5);
+        }
+
+        // 4. 수신자 다양성 (최대 15점) — 많은 지갑으로 분산
+        score += Math.min(15, r.unique_receivers * 1.5);
+
+        // 5. 신규 토큰 보너스 (10점)
+        if (isNew) score += 10;
+
+        // 6. 최대 단건 (최대 5점)
+        if (r.max_usd >= 1e6) score += 5;
+        else if (r.max_usd >= 500000) score += 3;
+        else if (r.max_usd >= 100000) score += 1;
+
+        score = Math.min(100, Math.round(score));
+
+        return {
+          sym: r.sym, chain: r.chain, ca: r.ca, score,
+          cnt_7d: r.cnt_7d, cnt_24h: h24.cnt_24h, cnt_1h: h1.cnt_1h,
+          total_usd_7d: r.total_usd_7d, usd_24h: h24.usd_24h,
+          avg_usd: r.avg_usd, max_usd: r.max_usd,
+          unique_receivers: r.unique_receivers, unique_senders: r.unique_senders,
+          is_new: isNew, last_ts: r.last_ts,
+        };
+      });
+
+      scored.sort((a, b) => b.score - a.score);
+      const top = scored.slice(0, 20);
+
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: true, count: top.length, data: top }));
+    } catch (e) {
+      res.writeHead(500);
+      res.end(JSON.stringify({ ok: false, error: e.message }));
+    }
+    return;
+  }
+
   // /analytics/anomalies → 5가지 이상 신호 종합
   if (req.url?.startsWith('/analytics/anomalies')) {
     try {
