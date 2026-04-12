@@ -8460,7 +8460,7 @@ function addWatchClusterFromSignal(key, chain){
 }
 
 function runFullSmtAnalysis(ca,chain){
-  // 통합 CA 입력에 채우고 토큰 분석 탭으로 전환
+  // 통합 CA 입력에 채우고 토큰 분석 탭으로 전환 + 자동 시작
   var u=document.getElementById('uniCA');if(u)u.value=ca;
   var uc=document.getElementById('uniChain');if(uc)uc.value=chain;
   syncCaFromInput(ca,chain);
@@ -8470,6 +8470,8 @@ function runFullSmtAnalysis(ca,chain){
   } else {
     switchTab('o');
   }
+  // 탭 전환 후 자동 분석 시작
+  setTimeout(function(){ if(typeof uniRun==='function') uniRun(); }, 300);
 }
 
 function runMasterAnalysis(){
