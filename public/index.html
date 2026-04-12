@@ -1646,8 +1646,8 @@ window.addEventListener('DOMContentLoaded', function(){
     <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;">
       <div style="font-size:12px;font-weight:bold;color:#000080;">📊 토큰별 100K+ 전송 빈도</div>
       <div style="display:flex;gap:0;margin-left:auto;">
-        <button class="freq-tab" id="freqTab1" onclick="analyticsLoadFreq(1)">1일</button>
-        <button class="freq-tab on" id="freqTab7" onclick="analyticsLoadFreq(7)">7일</button>
+        <button class="freq-tab on" id="freqTab1" onclick="analyticsLoadFreq(1)">1일</button>
+        <button class="freq-tab" id="freqTab7" onclick="analyticsLoadFreq(7)">7일</button>
         <button class="freq-tab" id="freqTab30" onclick="analyticsLoadFreq(30)">30일</button>
       </div>
       <select id="freqSort" onchange="analyticsRenderFreq()" style="font-size:11px;">
@@ -1779,7 +1779,7 @@ window.addEventListener('DOMContentLoaded', function(){
 // ════════════════════════════════════════════════════════════
 var ANALYTICS = {
   freqData: [],
-  freqDays: 7,
+  freqDays: 1,
   anomalies: [],
   autoTimer: null,
 };
