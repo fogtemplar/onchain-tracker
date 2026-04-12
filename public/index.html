@@ -2765,8 +2765,8 @@ function whaleRender(){
     var ago = tAgo(r.ts/1000);
     var pctStr = r.supplyPct > 0 ? r.supplyPct.toFixed(2)+'%' : '—';
     var pctColor = r.supplyPct >= 1 ? '#800000' : r.supplyPct >= 0.1 ? '#808000' : '#000080';
-    var fromLabel = EX_MAP[r.from] ? '🏦 '+EX_MAP[r.from] : '👤 '+r.from.slice(0,6)+'…'+r.from.slice(-4);
-    var toLabel = EX_MAP[r.to] ? '🏦 '+EX_MAP[r.to] : '👤 '+r.to.slice(0,6)+'…'+r.to.slice(-4);
+    var fromLabel = r.fromENS ? '🏷 '+r.fromENS : (EX_MAP[r.from] ? '🏦 '+EX_MAP[r.from] : '👤 '+r.from.slice(0,6)+'…'+r.from.slice(-4));
+    var toLabel = r.toENS ? '🏷 '+r.toENS : (EX_MAP[r.to] ? '🏦 '+EX_MAP[r.to] : '👤 '+r.to.slice(0,6)+'…'+r.to.slice(-4));
     var fromAgeStr = r.fromAge ? ' <span style="font-size:9px;color:#808080;font-weight:bold;">['+r.fromAge+']</span>' : '';
     var toAgeStr = r.toAge ? ' <span style="font-size:9px;color:#808080;font-weight:bold;">['+r.toAge+']</span>' : '';
     var fromLinks = '<a href="'+exp+'/address/'+r.from+'" target="_blank" style="font-family:monospace;color:#0000ff;font-size:10px;">'+fromLabel+'</a>'+fromAgeStr+' <a href="https://debank.com/profile/'+r.from+'" target="_blank" style="font-size:9px;color:#008000;">(DeBank)</a>';

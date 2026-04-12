@@ -8,6 +8,7 @@ import http from 'http';
 import Database from 'better-sqlite3';
 import fs from 'fs';
 import path from 'path';
+import { keccak256 } from 'js-sha3';
 
 // ── Config (env or hardcoded fallback) ──
 const ALCHEMY_KEY = process.env.ALCHEMY_KEY || 'I3Is5NQvnbgijvrbhdFp9';
@@ -72,13 +73,15 @@ try { db.exec('ALTER TABLE txs ADD COLUMN tx_type TEXT'); } catch (e) {}
 try { db.exec('ALTER TABLE txs ADD COLUMN tx_tag TEXT'); } catch (e) {}
 try { db.exec('ALTER TABLE txs ADD COLUMN from_age TEXT'); } catch (e) {}
 try { db.exec('ALTER TABLE txs ADD COLUMN to_age TEXT'); } catch (e) {}
+try { db.exec('ALTER TABLE txs ADD COLUMN from_ens TEXT'); } catch (e) {}
+try { db.exec('ALTER TABLE txs ADD COLUMN to_ens TEXT'); } catch (e) {}
 const dbCount = db.prepare('SELECT COUNT(*) AS c FROM txs').get().c;
 console.log(`[DB] SQLite at ${DB_PATH} — ${dbCount} rows`);
 
 // Prepared statements
 const stmtInsert = db.prepare(`
-  INSERT OR IGNORE INTO txs (ts, chain, sym, ca, amt, price, usd, supply_pct, ex_from, ex_to, addr_from, addr_to, hash, tx_type, tx_tag, from_age, to_age)
-  VALUES (@ts, @chain, @sym, @ca, @amt, @price, @usd, @supply_pct, @ex_from, @ex_to, @addr_from, @addr_to, @hash, @tx_type, @tx_tag, @from_age, @to_age)
+  INSERT OR IGNORE INTO txs (ts, chain, sym, ca, amt, price, usd, supply_pct, ex_from, ex_to, addr_from, addr_to, hash, tx_type, tx_tag, from_age, to_age, from_ens, to_ens)
+  VALUES (@ts, @chain, @sym, @ca, @amt, @price, @usd, @supply_pct, @ex_from, @ex_to, @addr_from, @addr_to, @hash, @tx_type, @tx_tag, @from_age, @to_age, @from_ens, @to_ens)
 `);
 const stmtRecent = db.prepare(`SELECT * FROM txs ORDER BY ts DESC LIMIT ?`);
 const stmtFilter = db.prepare(`
@@ -477,6 +480,84 @@ function formatAge(age) {
   return age.days + 'd';
 }
 
+// ── ENS reverse lookup (ETH mainnet only, SQLite 캐시) ──
+db.exec(`
+  CREATE TABLE IF NOT EXISTS ens_cache (
+    addr TEXT PRIMARY KEY,
+    name TEXT,
+    updated_at INTEGER NOT NULL
+  )
+`);
+const stmtEnsGet = db.prepare('SELECT name, updated_at FROM ens_cache WHERE addr = ?');
+const stmtEnsSet = db.prepare('INSERT OR REPLACE INTO ens_cache (addr, name, updated_at) VALUES (?, ?, ?)');
+
+function namehash(name) {
+  let node = new Uint8Array(32);
+  if (name) {
+    const labels = name.split('.');
+    for (let i = labels.length - 1; i >= 0; i--) {
+      const labelHash = Buffer.from(keccak256(labels[i]), 'hex');
+      const combined = Buffer.concat([node, labelHash]);
+      node = Buffer.from(keccak256(combined), 'hex');
+    }
+  }
+  return '0x' + Buffer.from(node).toString('hex');
+}
+
+async function resolveENS(addr) {
+  const lo = addr.toLowerCase();
+
+  // 1. SQLite 캐시 (30일 TTL)
+  try {
+    const row = stmtEnsGet.get(lo);
+    if (row && Date.now() - row.updated_at < 30 * 86400 * 1000) {
+      return row.name || null;
+    }
+  } catch (e) {}
+
+  // 2. ENS reverse lookup via ETH mainnet RPC (PublicNode 무료)
+  try {
+    const reverseNode = namehash(lo.slice(2) + '.addr.reverse');
+    // ENS Registry: resolver(bytes32 node)
+    const resolverHex = await ethRpc('eth_call', [{
+      to: '0x00000000000C2E074eC69A0dFb2997BA6C7d2e1e',
+      data: '0x0178b8bf' + reverseNode.slice(2),
+    }, 'latest']);
+
+    if (!resolverHex || resolverHex === '0x' || resolverHex === '0x' + '0'.repeat(64)) {
+      try { stmtEnsSet.run(lo, null, Date.now()); } catch (e) {}
+      return null;
+    }
+
+    const resolverAddr = '0x' + resolverHex.slice(-40);
+    // Resolver: name(bytes32 node)
+    const nameHex = await ethRpc('eth_call', [{
+      to: resolverAddr,
+      data: '0x691f3431' + reverseNode.slice(2),
+    }, 'latest']);
+
+    const ensName = abiDecodeString(nameHex);
+    try { stmtEnsSet.run(lo, ensName || null, Date.now()); } catch (e) {}
+    return ensName || null;
+  } catch (e) {
+    return null;
+  }
+}
+
+// ETH mainnet RPC (PublicNode → Alchemy 폴백)
+async function ethRpc(method, params) {
+  const body = JSON.stringify({ jsonrpc: '2.0', method, params, id: 1 });
+  const opts = { method: 'POST', headers: { 'Content-Type': 'application/json' }, body, signal: AbortSignal.timeout(6000) };
+  try {
+    const res = await fetch('https://ethereum-rpc.publicnode.com', opts);
+    const d = await res.json();
+    if (!d.error) return d.result;
+  } catch (e) {}
+  const res = await fetch(ALCHEMY_HTTP.eth, { ...opts, signal: AbortSignal.timeout(6000) });
+  const d = await res.json();
+  return d.result;
+}
+
 // ── LP 감지 DB (SQLite 영구 캐시) ──
 db.exec(`
   CREATE TABLE IF NOT EXISTS addr_type (
@@ -866,8 +947,8 @@ function formatMessage(r) {
     `📦 수량: ${fN(r.amt)} ${r.sym}${supplyStr}\n` +
     `🔗 네트워크: ${CHAINS[r.chain].name}\n` +
     `🕐 ${new Date(r.ts).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' })}\n\n` +
-    `🏦 From: <code>${r.from}</code>${r.fromEx ? ' (' + r.fromEx + ')' : ''} [${r.fromAge}]\n` +
-    `👤 To: <code>${r.to}</code>${r.toEx ? ' (' + r.toEx + ')' : ''} [${r.toAge}]\n\n` +
+    `🏦 From: ${r.fromENS ? '<b>' + r.fromENS + '</b> ' : ''}<code>${r.from}</code>${r.fromEx ? ' (' + r.fromEx + ')' : ''} [${r.fromAge}]\n` +
+    `👤 To: ${r.toENS ? '<b>' + r.toENS + '</b> ' : ''}<code>${r.to}</code>${r.toEx ? ' (' + r.toEx + ')' : ''} [${r.toAge}]\n\n` +
     `<a href="${CHAINS[r.chain].exp}/tx/${r.hash}">TX 보기</a> · ` +
     `<a href="${CHAINS[r.chain].exp}/token/${r.ca}">토큰</a>`;
 }
@@ -953,10 +1034,12 @@ async function handleLog(chain, log_, source) {
     // 트랜잭션 유형 분류
     const txClass = classifyTxType(from, to, fromEx, toEx);
 
-    // 지갑 나이 조회 (병렬)
-    const [fromAge, toAge] = await Promise.all([
+    // 지갑 나이 + ENS 조회 (병렬)
+    const [fromAge, toAge, fromENS, toENS] = await Promise.all([
       getWalletAge(chain, from).catch(() => null),
       getWalletAge(chain, to).catch(() => null),
+      resolveENS(from).catch(() => null),
+      resolveENS(to).catch(() => null),
     ]);
 
     state.stats.detected++;
@@ -964,6 +1047,7 @@ async function handleLog(chain, log_, source) {
       chain, sym: meta.symbol, ca, amt, price, usd,
       from, to, fromEx, toEx, hash, supplyPct,
       fromAge: formatAge(fromAge), toAge: formatAge(toAge),
+      fromENS: fromENS || null, toENS: toENS || null,
       tx_type: txClass.type,
       tx_label: txClass.label,
       tx_tag: txClass.tag,
@@ -980,6 +1064,7 @@ async function handleLog(chain, log_, source) {
         addr_from: r.from, addr_to: r.to, hash: r.hash,
         tx_type: r.tx_type || null, tx_tag: r.tx_tag || null,
         from_age: r.fromAge || null, to_age: r.toAge || null,
+        from_ens: r.fromENS || null, to_ens: r.toENS || null,
       });
     } catch (e) { console.warn('db insert err:', e.message); }
 
@@ -1161,7 +1246,7 @@ const httpServer = http.createServer(async (req, res) => {
         from: row.addr_from, to: row.addr_to,
         fromEx: row.ex_from, toEx: row.ex_to, hash: row.hash,
         tx_type: row.tx_type, tx_tag: row.tx_tag,
-        fromAge: row.from_age, toAge: row.to_age,
+        fromAge: row.from_age, toAge: row.to_age, fromENS: row.from_ens, toENS: row.to_ens,
       }));
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ ok: true, count: data.length, data }));
@@ -1555,7 +1640,7 @@ wss.on('connection', (clientWs, req) => {
       from: row.addr_from, to: row.addr_to,
       fromEx: row.ex_from, toEx: row.ex_to, hash: row.hash,
       tx_type: row.tx_type, tx_tag: row.tx_tag,
-      fromAge: row.from_age, toAge: row.to_age,
+      fromAge: row.from_age, toAge: row.to_age, fromENS: row.from_ens, toENS: row.to_ens,
     }));
     const total = db.prepare('SELECT COUNT(*) AS c FROM txs').get().c;
     clientWs.send(JSON.stringify({
