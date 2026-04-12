@@ -1874,9 +1874,6 @@ function analyticsRenderWatchlist(){
     var scoreColor = w.score >= 70 ? '#800000' : w.score >= 40 ? '#808000' : '#000080';
     var barW = Math.min(100, w.score);
     var badges = '';
-    if(w.is_new) badges += '<span style="background:#800000;color:#fff;padding:0 4px;font-size:8px;font-weight:bold;">NEW</span> ';
-    if(w.mcLabel === 'MICRO') badges += '<span style="background:#800080;color:#fff;padding:0 4px;font-size:8px;font-weight:bold;">MICRO</span> ';
-    else if(w.mcLabel === 'SMALL') badges += '<span style="background:#808000;color:#fff;padding:0 4px;font-size:8px;font-weight:bold;">SMALL</span> ';
     var ago = w.last_ts ? tAgo(w.last_ts/1000) : '—';
     var mcStr = w.mc > 0 ? '$'+fN(w.mc) : '—';
     var fdvStr = w.fdv > 0 ? '$'+fN(w.fdv) : '—';
@@ -1905,9 +1902,9 @@ function analyticsRenderWatchlist(){
         var labels = [];
         if(w.new_wallet_cnt > 0) labels.push('<span style="background:#800000;color:#fff;padding:1px 5px;font-size:8px;font-weight:bold;">🆕신규지갑 '+w.new_wallet_cnt+'</span>');
         if(w.single_token_cnt > 0) labels.push('<span style="background:#800080;color:#fff;padding:1px 5px;font-size:8px;font-weight:bold;">🎯단일토큰 '+w.single_token_cnt+'</span>');
-        if(w.mcLabel === 'MICRO') labels.push('<span style="background:#808000;color:#fff;padding:1px 5px;font-size:8px;font-weight:bold;">MICRO CAP</span>');
-        else if(w.mcLabel === 'SMALL') labels.push('<span style="background:#004080;color:#fff;padding:1px 5px;font-size:8px;font-weight:bold;">SMALL CAP</span>');
-        if(w.is_new) labels.push('<span style="background:#008000;color:#fff;padding:1px 5px;font-size:8px;font-weight:bold;">NEW TOKEN</span>');
+        if(w.mcLabel === 'MICRO') labels.push('<span style="background:#808000;color:#fff;padding:1px 5px;font-size:8px;font-weight:bold;">초소형</span>');
+        else if(w.mcLabel === 'SMALL') labels.push('<span style="background:#004080;color:#fff;padding:1px 5px;font-size:8px;font-weight:bold;">소형</span>');
+        if(w.is_new) labels.push('<span style="background:#008000;color:#fff;padding:1px 5px;font-size:8px;font-weight:bold;">신규토큰</span>');
         return labels.length ? '<div style="display:flex;flex-wrap:wrap;gap:3px;margin-top:5px;pointer-events:none;">'+labels.join('')+'</div>' : '';
       })()+
     '</div>';
