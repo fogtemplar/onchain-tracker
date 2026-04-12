@@ -466,16 +466,33 @@ async function getTokenMeta(chain, ca) {
 }
 
 // ── Price ──
-// CA 우선 캐시 — 동명이형 토큰 (e.g. BSC TOSHI vs Base TOSHI) 가격 충돌 방지
+// 1순위 Binance (상장 토큰 가장 정확) → 2순위 DexScreener (비상장) → 3순위 CoinGecko
 async function getPrice(symbol, ca, chain) {
   const caLo = (ca || '').toLowerCase();
-  // CA 단위 캐시 (정확)
+  const key = (symbol || '').toUpperCase();
+
+  // CA 단위 캐시
   if (caLo) {
     const cached = state.priceCache.get(caLo);
     if (cached && Date.now() - cached.ts < 5 * 60 * 1000) return cached.price;
   }
 
-  // 1. DexScreener — CA 직접 조회 + 클러스터 기반 가격 (이상치 제거)
+  let finalPrice = 0;
+
+  // 1순위: Binance (상장 토큰은 가장 정확)
+  if (key) {
+    try {
+      const r = await fetch(`https://api.binance.com/api/v3/ticker/price?symbol=${key}USDT`);
+      if (r.ok) {
+        const d = await r.json();
+        const p = parseFloat(d.price);
+        if (p > 0) finalPrice = p;
+      }
+    } catch (e) {}
+  }
+
+  // 2순위: DexScreener — CA 직접 조회 + 클러스터 기반 (비상장 또는 Binance 교차 검증)
+  let dexPrice = 0;
   if (caLo) {
     try {
       const r = await fetch(`https://api.dexscreener.com/latest/dex/tokens/${caLo}`);
@@ -485,50 +502,49 @@ async function getPrice(symbol, ca, chain) {
           .filter(p => p.priceUsd && parseFloat(p.priceUsd) > 0 && (p.liquidity?.usd || 0) >= 1000);
         if (valid.length >= 1) {
           const prices = valid.map(p => parseFloat(p.priceUsd)).sort((a, b) => a - b);
-
-          // 가격 클러스터링: 최소값 기준 10x 이내만 "같은 가격대"
-          // (DexScreener 가격 뒤집힘/동명이형 방어)
-          const basePrice = prices[0]; // 최소값
-          const cluster = prices.filter(p => p <= basePrice * 10);
-
-          // 클러스터 내 중앙값 (이상치 제거됨)
-          let finalPrice;
-          if (cluster.length >= 1) {
-            const mid = Math.floor(cluster.length / 2);
-            finalPrice = cluster.length % 2 === 0
-              ? (cluster[mid - 1] + cluster[mid]) / 2
-              : cluster[mid];
-          } else {
-            finalPrice = basePrice;
-          }
-
-          if (finalPrice > 0) {
-            state.priceCache.set(caLo, { price: finalPrice, ts: Date.now() });
-            return finalPrice;
-          }
+          const baseP = prices[0];
+          const cluster = prices.filter(p => p <= baseP * 10);
+          const mid = Math.floor(cluster.length / 2);
+          dexPrice = cluster.length % 2 === 0
+            ? (cluster[mid - 1] + cluster[mid]) / 2
+            : cluster[mid];
         }
       }
     } catch (e) {}
   }
 
-  // 2. Binance — 심볼 매칭 (마지막 폴백)
-  // 주의: 동명이형 가능 → CA로 못 찾았을 때만 사용
-  const key = (symbol || '').toUpperCase();
-  if (key) {
+  // 교차 검증
+  if (finalPrice > 0 && dexPrice > 0) {
+    // 둘 다 있으면: 5x 이상 차이 시 낮은 쪽 (동명 토큰 방어)
+    const ratio = finalPrice / dexPrice;
+    if (ratio > 5 || ratio < 0.2) {
+      finalPrice = Math.min(finalPrice, dexPrice);
+    }
+    // 차이 적으면 Binance 우선 (이미 finalPrice에 있음)
+  } else if (finalPrice === 0 && dexPrice > 0) {
+    // Binance 없으면 DexScreener
+    finalPrice = dexPrice;
+  }
+
+  // 3순위: CoinGecko (둘 다 실패 시)
+  if (finalPrice === 0 && caLo) {
     try {
-      const r = await fetch(`https://api.binance.com/api/v3/ticker/price?symbol=${key}USDT`);
-      if (r.ok) {
-        const d = await r.json();
-        const p = parseFloat(d.price);
-        if (p > 0) {
-          // CA 캐시에도 저장 (동명 충돌 방지를 위해 CA 단위)
-          if (caLo) state.priceCache.set(caLo, { price: p, ts: Date.now() });
-          return p;
+      const platform = {eth:'ethereum',bsc:'binance-smart-chain',arb:'arbitrum-one',base:'base',poly:'polygon-pos'}[chain];
+      if (platform) {
+        const r = await fetch(`https://api.coingecko.com/api/v3/simple/token_price/${platform}?contract_addresses=${caLo}&vs_currencies=usd`);
+        if (r.ok) {
+          const d = await r.json();
+          const p = d[caLo]?.usd;
+          if (p > 0) finalPrice = p;
         }
       }
     } catch (e) {}
   }
-  return 0;
+
+  if (finalPrice > 0 && caLo) {
+    state.priceCache.set(caLo, { price: finalPrice, ts: Date.now() });
+  }
+  return finalPrice;
 }
 
 // ── CA 리스트 빌드 (CoinGecko top 1000 ∩ Binance whitelist) ──
