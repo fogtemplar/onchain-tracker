@@ -15,6 +15,8 @@ const BOT_TOKEN   = process.env.BOT_TOKEN   || '7890873311:AAGMVgMBcFsWg9mcWE5Vi
 const CHAT_ID     = process.env.CHAT_ID     || '-1003743061931';
 const MIN_USD     = parseInt(process.env.MIN_USD || '100000');
 const PORT        = parseInt(process.env.PORT || '3000');
+const CMC_KEY     = process.env.CMC_KEY     || '7c23a703-55ff-4b19-babd-a4cf83aae98c';
+const CG_API_KEY  = process.env.CG_API_KEY  || 'b745429f379948b8b715f6beded5c2ea';
 
 // ── Chain config ──
 // BSC: Alchemy가 logs 구독 거부 → PublicNode 무료 WebSocket 사용
@@ -523,80 +525,108 @@ async function getTokenMeta(chain, ca) {
   }
 }
 
-// ── Price ──
-// 1순위 Binance (상장 토큰 가장 정확) → 2순위 DexScreener (비상장) → 3순위 CoinGecko
+// ── Price — 5개 소스 병렬 조회 + 합의 기반 선정 ──
+// Binance · DexScreener · CoinGecko · CoinMarketCap · CoinGlass
+const PLATFORM_MAP = {eth:'ethereum',bsc:'binance-smart-chain',arb:'arbitrum-one',base:'base',poly:'polygon-pos'};
+
 async function getPrice(symbol, ca, chain) {
   const caLo = (ca || '').toLowerCase();
-  const key = (symbol || '').toUpperCase();
+  const sym = (symbol || '').toUpperCase();
 
-  // CA 단위 캐시
+  // CA 단위 캐시 (5분)
   if (caLo) {
     const cached = state.priceCache.get(caLo);
     if (cached && Date.now() - cached.ts < 5 * 60 * 1000) return cached.price;
   }
 
-  let finalPrice = 0;
+  // 5개 소스 병렬 조회
+  const results = await Promise.allSettled([
+    // 1. Binance
+    (async () => {
+      if (!sym) return 0;
+      const r = await fetch(`https://api.binance.com/api/v3/ticker/price?symbol=${sym}USDT`,
+        { signal: AbortSignal.timeout(5000) });
+      if (!r.ok) return 0;
+      const d = await r.json();
+      return parseFloat(d.price) || 0;
+    })(),
 
-  // 1순위: Binance (상장 토큰은 가장 정확)
-  if (key) {
-    try {
-      const r = await fetch(`https://api.binance.com/api/v3/ticker/price?symbol=${key}USDT`);
-      if (r.ok) {
-        const d = await r.json();
-        const p = parseFloat(d.price);
-        if (p > 0) finalPrice = p;
-      }
-    } catch (e) {}
-  }
+    // 2. DexScreener (CA 기반 + 클러스터 중앙값)
+    (async () => {
+      if (!caLo) return 0;
+      const r = await fetch(`https://api.dexscreener.com/latest/dex/tokens/${caLo}`,
+        { signal: AbortSignal.timeout(5000) });
+      if (!r.ok) return 0;
+      const d = await r.json();
+      const valid = (d.pairs || [])
+        .filter(p => p.priceUsd && parseFloat(p.priceUsd) > 0 && (p.liquidity?.usd || 0) >= 1000);
+      if (!valid.length) return 0;
+      const prices = valid.map(p => parseFloat(p.priceUsd)).sort((a, b) => a - b);
+      const cluster = prices.filter(p => p <= prices[0] * 10);
+      const mid = Math.floor(cluster.length / 2);
+      return cluster.length % 2 === 0 ? (cluster[mid-1]+cluster[mid])/2 : cluster[mid];
+    })(),
 
-  // 2순위: DexScreener — CA 직접 조회 + 클러스터 기반 (비상장 또는 Binance 교차 검증)
-  let dexPrice = 0;
-  if (caLo) {
-    try {
-      const r = await fetch(`https://api.dexscreener.com/latest/dex/tokens/${caLo}`);
-      if (r.ok) {
-        const d = await r.json();
-        const valid = (d.pairs || [])
-          .filter(p => p.priceUsd && parseFloat(p.priceUsd) > 0 && (p.liquidity?.usd || 0) >= 1000);
-        if (valid.length >= 1) {
-          const prices = valid.map(p => parseFloat(p.priceUsd)).sort((a, b) => a - b);
-          const baseP = prices[0];
-          const cluster = prices.filter(p => p <= baseP * 10);
-          const mid = Math.floor(cluster.length / 2);
-          dexPrice = cluster.length % 2 === 0
-            ? (cluster[mid - 1] + cluster[mid]) / 2
-            : cluster[mid];
-        }
-      }
-    } catch (e) {}
-  }
+    // 3. CoinGecko (CA 기반)
+    (async () => {
+      if (!caLo) return 0;
+      const platform = PLATFORM_MAP[chain];
+      if (!platform) return 0;
+      const r = await fetch(`https://api.coingecko.com/api/v3/simple/token_price/${platform}?contract_addresses=${caLo}&vs_currencies=usd`,
+        { signal: AbortSignal.timeout(5000) });
+      if (!r.ok) return 0;
+      const d = await r.json();
+      return d[caLo]?.usd || 0;
+    })(),
 
-  // 교차 검증
-  if (finalPrice > 0 && dexPrice > 0) {
-    // 둘 다 있으면: 5x 이상 차이 시 낮은 쪽 (동명 토큰 방어)
-    const ratio = finalPrice / dexPrice;
-    if (ratio > 5 || ratio < 0.2) {
-      finalPrice = Math.min(finalPrice, dexPrice);
-    }
-    // 차이 적으면 Binance 우선 (이미 finalPrice에 있음)
-  } else if (finalPrice === 0 && dexPrice > 0) {
-    // Binance 없으면 DexScreener
-    finalPrice = dexPrice;
-  }
+    // 4. CoinMarketCap (심볼 기반)
+    (async () => {
+      if (!sym || !CMC_KEY) return 0;
+      const r = await fetch(`https://pro-api.coinmarketcap.com/v1/cryptocurrency/quotes/latest?symbol=${sym}&convert=USD`,
+        { headers: { 'X-CMC_PRO_API_KEY': CMC_KEY }, signal: AbortSignal.timeout(5000) });
+      if (!r.ok) return 0;
+      const d = await r.json();
+      const data = d.data?.[sym];
+      if (!data) return 0;
+      return data.quote?.USD?.price || 0;
+    })(),
 
-  // 3순위: CoinGecko (둘 다 실패 시)
-  if (finalPrice === 0 && caLo) {
-    try {
-      const platform = {eth:'ethereum',bsc:'binance-smart-chain',arb:'arbitrum-one',base:'base',poly:'polygon-pos'}[chain];
-      if (platform) {
-        const r = await fetch(`https://api.coingecko.com/api/v3/simple/token_price/${platform}?contract_addresses=${caLo}&vs_currencies=usd`);
-        if (r.ok) {
-          const d = await r.json();
-          const p = d[caLo]?.usd;
-          if (p > 0) finalPrice = p;
-        }
-      }
-    } catch (e) {}
+    // 5. CoinGlass (선물 가격)
+    (async () => {
+      if (!sym || !CG_API_KEY) return 0;
+      const r = await fetch(`https://open-api-v4.coinglass.com/api/futures/coins-markets?symbol=${sym}`,
+        { headers: { 'CG-API-KEY': CG_API_KEY }, signal: AbortSignal.timeout(5000) });
+      if (!r.ok) return 0;
+      const d = await r.json();
+      if (d.code !== '0' || !d.data?.length) return 0;
+      return parseFloat(d.data[0].price) || 0;
+    })(),
+  ]);
+
+  // 결과 수집 (실패 = 0)
+  const sources = ['Binance', 'DexScreener', 'CoinGecko', 'CMC', 'CoinGlass'];
+  const prices = results.map((r, i) => ({
+    src: sources[i],
+    price: r.status === 'fulfilled' ? r.value : 0,
+  })).filter(p => p.price > 0);
+
+  if (!prices.length) return 0;
+
+  // 합의 기반 선정
+  // 모든 유효 가격을 정렬 → 클러스터링 (최소값 기준 5x 이내) → 클러스터 중앙값
+  const sorted = prices.map(p => p.price).sort((a, b) => a - b);
+  const baseP = sorted[0];
+  const cluster = sorted.filter(p => p <= baseP * 5);
+
+  let finalPrice;
+  if (cluster.length >= 2) {
+    // 2개+ 소스가 동의 → 중앙값 (가장 신뢰)
+    const mid = Math.floor(cluster.length / 2);
+    finalPrice = cluster.length % 2 === 0 ? (cluster[mid-1]+cluster[mid])/2 : cluster[mid];
+  } else if (cluster.length === 1) {
+    finalPrice = cluster[0];
+  } else {
+    finalPrice = baseP;
   }
 
   if (finalPrice > 0 && caLo) {
