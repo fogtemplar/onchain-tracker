@@ -1900,12 +1900,12 @@ function analyticsRenderWatchlist(){
       '</div>'+
       (function(){
         var labels = [];
-        if(w.new_wallet_cnt > 0) labels.push('<span style="background:#800000;color:#fff;padding:1px 5px;font-size:8px;font-weight:bold;">신규지갑 '+w.new_wallet_cnt+'</span>');
-        if(w.single_token_cnt > 0) labels.push('<span style="background:#800080;color:#fff;padding:1px 5px;font-size:8px;font-weight:bold;">단일토큰 '+w.single_token_cnt+'</span>');
-        if(w.mcLabel === 'MICRO') labels.push('<span style="background:#808000;color:#fff;padding:1px 5px;font-size:8px;font-weight:bold;">초소형</span>');
-        else if(w.mcLabel === 'SMALL') labels.push('<span style="background:#004080;color:#fff;padding:1px 5px;font-size:8px;font-weight:bold;">소형</span>');
-        if(w.is_new) labels.push('<span style="background:#008000;color:#fff;padding:1px 5px;font-size:8px;font-weight:bold;">신규토큰</span>');
-        return labels.length ? '<div style="display:flex;flex-wrap:wrap;gap:3px;margin-top:5px;pointer-events:none;">'+labels.join('')+'</div>' : '';
+        if(w.new_wallet_cnt > 0) labels.push('<span title="생성 30일 이내 지갑으로 입금된 횟수" style="background:#800000;color:#fff;padding:1px 5px;font-size:8px;font-weight:bold;cursor:help;">신규지갑 '+w.new_wallet_cnt+'</span>');
+        if(w.single_token_cnt > 0) labels.push('<span title="이 토큰만 보유한 지갑으로 입금된 횟수" style="background:#800080;color:#fff;padding:1px 5px;font-size:8px;font-weight:bold;cursor:help;">단일토큰 '+w.single_token_cnt+'</span>');
+        if(w.mcLabel === 'MICRO') labels.push('<span title="시가총액 $10M 미만" style="background:#808000;color:#fff;padding:1px 5px;font-size:8px;font-weight:bold;cursor:help;">초소형</span>');
+        else if(w.mcLabel === 'SMALL') labels.push('<span title="시가총액 $10M~$50M" style="background:#004080;color:#fff;padding:1px 5px;font-size:8px;font-weight:bold;cursor:help;">소형</span>');
+        if(w.is_new) labels.push('<span title="최근 3일 이내 처음 감지된 토큰" style="background:#008000;color:#fff;padding:1px 5px;font-size:8px;font-weight:bold;cursor:help;">신규토큰</span>');
+        return labels.length ? '<div style="display:flex;flex-wrap:wrap;gap:3px;margin-top:5px;pointer-events:auto;">'+labels.join('')+'</div>' : '';
       })()+
     '</div>';
   }).join('');
@@ -2780,7 +2780,8 @@ function whaleRender(){
     if(r.toFlags && r.toFlags.length){
       toFlagStr = ' ' + r.toFlags.map(function(f){
         var bg = f.indexOf('신규')>=0 ? '#800000' : '#800080';
-        return '<span style="background:'+bg+';color:#fff;padding:0 4px;font-size:8px;font-weight:bold;">'+f+'</span>';
+        var tip = f.indexOf('신규')>=0 ? '생성 30일 이내 지갑' : '이 토큰만 보유한 지갑';
+        return '<span title="'+tip+'" style="background:'+bg+';color:#fff;padding:0 4px;font-size:8px;font-weight:bold;cursor:help;">'+f+'</span>';
       }).join(' ');
     }
     var toLinks = '<a href="'+exp+'/address/'+r.to+'" target="_blank" style="font-family:monospace;color:#0000ff;font-size:10px;">'+toLabel+'</a>'+toAgeStr+toFlagStr+' <a href="https://debank.com/profile/'+r.to+'" target="_blank" style="font-size:9px;color:#008000;">(DeBank)</a>';
