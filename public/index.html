@@ -1882,16 +1882,16 @@ function analyticsRenderWatchlist(){
     var fdvStr = w.fdv > 0 ? '$'+fN(w.fdv) : '—';
     var mcColor = w.mc > 0 && w.mc < 10e6 ? '#800080' : w.mc > 0 && w.mc < 50e6 ? '#808000' : '#000';
     var ca = w.ca || '';
-    return '<div data-ca="'+ca+'" data-chain="'+w.chain+'" onclick="var c=this.dataset.ca;if(c)runFullSmtAnalysis(c,this.dataset.chain);" style="cursor:pointer;background:#fff;box-shadow:inset 1px 1px 0 #808080,inset -1px -1px 0 #fff;padding:8px 10px;">'+
-      '<div style="display:flex;align-items:center;gap:4px;margin-bottom:4px;">'+
+    return '<div class="wl-card" data-ca="'+ca+'" data-chain="'+w.chain+'" style="cursor:pointer;background:#fff;box-shadow:inset 1px 1px 0 #808080,inset -1px -1px 0 #fff;padding:8px 10px;">'+
+      '<div style="display:flex;align-items:center;gap:4px;margin-bottom:4px;pointer-events:none;">'+
         '<span style="font-size:10px;color:#404040;min-width:18px;">#'+(i+1)+'</span>'+
         '<span style="font-size:13px;font-weight:bold;color:#000;">'+w.sym+'</span>'+
         '<span style="font-size:9px;color:'+(chainColor[w.chain]||'#000')+';font-weight:bold;">'+w.chain.toUpperCase()+'</span>'+
         badges+
         '<span style="margin-left:auto;font-size:14px;font-weight:900;color:'+scoreColor+';">'+w.score+'</span>'+
       '</div>'+
-      '<div style="height:3px;background:#dfdfdf;margin-bottom:5px;"><div style="height:100%;width:'+barW+'%;background:'+scoreColor+';"></div></div>'+
-      '<div style="display:grid;grid-template-columns:1fr 1fr;gap:2px;font-size:9px;color:#404040;">'+
+      '<div style="height:3px;background:#dfdfdf;margin-bottom:5px;pointer-events:none;"><div style="height:100%;width:'+barW+'%;background:'+scoreColor+';"></div></div>'+
+      '<div style="display:grid;grid-template-columns:1fr 1fr;gap:2px;font-size:9px;color:#404040;pointer-events:none;">'+
         '<span>MC: <b style="color:'+mcColor+';">'+mcStr+'</b></span>'+
         '<span>FDV: <b style="color:#000;">'+fdvStr+'</b></span>'+
         '<span>24h: <b style="color:#000;">'+w.cnt_24h+'건</b></span>'+
@@ -1903,6 +1903,15 @@ function analyticsRenderWatchlist(){
       '</div>'+
     '</div>';
   }).join('');
+
+  // 이벤트 위임: 카드 클릭 → 토큰 분석
+  el.onclick = function(e){
+    var card = e.target.closest('.wl-card');
+    if(!card) return;
+    var ca = card.dataset.ca;
+    var chain = card.dataset.chain;
+    if(ca && ca.startsWith('0x')) runFullSmtAnalysis(ca, chain);
+  };
 }
 
 // 하위 호환
