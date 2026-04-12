@@ -1830,7 +1830,7 @@ function analyticsRenderFreq(){
       var c = v >= maxCnt*0.7 ? '#800000' : v >= maxCnt*0.3 ? '#808000' : '#000080';
       return '<span class="spark-bar" style="height:'+h+'px;background:'+c+';" title="'+v+'건"></span>';
     }).join('');
-    return '<tr style="cursor:pointer;" onclick="analyticsTokenDetail(\''+r.sym+'\',\''+r.chain+'\',\''+(r.ca||'')+'\')">'+
+    return '<tr style="cursor:pointer;" data-ca="'+(r.ca||'')+'" data-chain="'+r.chain+'" data-sym="'+r.sym+'" onclick="analyticsTokenDetail(this.dataset.sym,this.dataset.chain,this.dataset.ca)">'+
       '<td style="text-align:center;color:#404040;">'+(i+1)+'</td>'+
       '<td style="font-weight:bold;">'+r.sym+'</td>'+
       '<td><span style="color:'+(chainColor[r.chain]||'#000')+';font-weight:bold;">'+r.chain.toUpperCase()+'</span></td>'+
@@ -1882,8 +1882,7 @@ function analyticsRenderWatchlist(){
     var fdvStr = w.fdv > 0 ? '$'+fN(w.fdv) : '—';
     var mcColor = w.mc > 0 && w.mc < 10e6 ? '#800080' : w.mc > 0 && w.mc < 50e6 ? '#808000' : '#000';
     var ca = w.ca || '';
-    var clickAttr = ca ? ' onclick="runFullSmtAnalysis(&quot;'+ca+'&quot;,&quot;'+w.chain+'&quot;)" style="cursor:pointer;' : ' style="';
-    return '<div'+clickAttr+'background:#fff;box-shadow:inset 1px 1px 0 #808080,inset -1px -1px 0 #fff;padding:8px 10px;">'+
+    return '<div data-ca="'+ca+'" data-chain="'+w.chain+'" onclick="var c=this.dataset.ca;if(c)runFullSmtAnalysis(c,this.dataset.chain);" style="cursor:pointer;background:#fff;box-shadow:inset 1px 1px 0 #808080,inset -1px -1px 0 #fff;padding:8px 10px;">'+
       '<div style="display:flex;align-items:center;gap:4px;margin-bottom:4px;">'+
         '<span style="font-size:10px;color:#404040;min-width:18px;">#'+(i+1)+'</span>'+
         '<span style="font-size:13px;font-weight:bold;color:#000;">'+w.sym+'</span>'+
