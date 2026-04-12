@@ -10,7 +10,7 @@ import fs from 'fs';
 import path from 'path';
 
 // ── Config (env or hardcoded fallback) ──
-const ALCHEMY_KEY = process.env.ALCHEMY_KEY || 'TDTn41PcLHD3pGfG1ilgz';
+const ALCHEMY_KEY = process.env.ALCHEMY_KEY || 'I3Is5NQvnbgijvrbhdFp9';
 const BOT_TOKEN   = process.env.BOT_TOKEN   || '7890873311:AAGMVgMBcFsWg9mcWE5Vi9ernwNPwoq0GVk';
 const CHAT_ID     = process.env.CHAT_ID     || '-1003743061931';
 const MIN_USD     = parseInt(process.env.MIN_USD || '100000');
