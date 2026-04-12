@@ -475,32 +475,31 @@ async function getPrice(symbol, ca, chain) {
     if (cached && Date.now() - cached.ts < 5 * 60 * 1000) return cached.price;
   }
 
-  // 1. DexScreener — CA 직접 조회 + 중앙값 (이상치 제거)
+  // 1. DexScreener — CA 직접 조회 + 클러스터 기반 가격 (이상치 제거)
   if (caLo) {
     try {
       const r = await fetch(`https://api.dexscreener.com/latest/dex/tokens/${caLo}`);
       if (r.ok) {
         const d = await r.json();
         const valid = (d.pairs || [])
-          .filter(p => p.priceUsd && parseFloat(p.priceUsd) > 0 && (p.liquidity?.usd || 0) >= 5000);
+          .filter(p => p.priceUsd && parseFloat(p.priceUsd) > 0 && (p.liquidity?.usd || 0) >= 1000);
         if (valid.length >= 1) {
-          // 중앙값 계산 (이상치 제거)
           const prices = valid.map(p => parseFloat(p.priceUsd)).sort((a, b) => a - b);
-          const mid = Math.floor(prices.length / 2);
-          const median = prices.length % 2 === 0
-            ? (prices[mid - 1] + prices[mid]) / 2
-            : prices[mid];
 
-          // 가장 유동성 큰 풀의 가격 가져오기
-          valid.sort((a, b) => (b.liquidity?.usd || 0) - (a.liquidity?.usd || 0));
-          const topPrice = parseFloat(valid[0].priceUsd);
+          // 가격 클러스터링: 최소값 기준 10x 이내만 "같은 가격대"
+          // (DexScreener 가격 뒤집힘/동명이형 방어)
+          const basePrice = prices[0]; // 최소값
+          const cluster = prices.filter(p => p <= basePrice * 10);
 
-          // top price가 중앙값과 5배 이상 차이나면 이상치 → 중앙값 사용
+          // 클러스터 내 중앙값 (이상치 제거됨)
           let finalPrice;
-          if (median > 0 && (topPrice / median > 5 || median / topPrice > 5)) {
-            finalPrice = median;
+          if (cluster.length >= 1) {
+            const mid = Math.floor(cluster.length / 2);
+            finalPrice = cluster.length % 2 === 0
+              ? (cluster[mid - 1] + cluster[mid]) / 2
+              : cluster[mid];
           } else {
-            finalPrice = topPrice;
+            finalPrice = basePrice;
           }
 
           if (finalPrice > 0) {
