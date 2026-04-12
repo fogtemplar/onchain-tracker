@@ -1092,10 +1092,10 @@ async function handleLog(chain, log_, source) {
     // ── 수신자 플래그 ──
     const toFlags = [];
     // 1) 신규지갑 (30일 이내 생성)
-    if (toAge && toAge.days <= 30) toFlags.push('🆕신규지갑');
+    if (toAge && toAge.days <= 30) toFlags.push('신규지갑');
     // 2) 단일토큰 지갑 (해당 코인만 보유)
     const singleToken = await checkSingleToken(chain, to, ca).catch(() => false);
-    if (singleToken) toFlags.push('🎯단일토큰');
+    if (singleToken) toFlags.push('단일토큰');
 
     state.stats.detected++;
     const r = {

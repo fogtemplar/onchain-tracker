@@ -1900,8 +1900,8 @@ function analyticsRenderWatchlist(){
       '</div>'+
       (function(){
         var labels = [];
-        if(w.new_wallet_cnt > 0) labels.push('<span style="background:#800000;color:#fff;padding:1px 5px;font-size:8px;font-weight:bold;">🆕신규지갑 '+w.new_wallet_cnt+'</span>');
-        if(w.single_token_cnt > 0) labels.push('<span style="background:#800080;color:#fff;padding:1px 5px;font-size:8px;font-weight:bold;">🎯단일토큰 '+w.single_token_cnt+'</span>');
+        if(w.new_wallet_cnt > 0) labels.push('<span style="background:#800000;color:#fff;padding:1px 5px;font-size:8px;font-weight:bold;">신규지갑 '+w.new_wallet_cnt+'</span>');
+        if(w.single_token_cnt > 0) labels.push('<span style="background:#800080;color:#fff;padding:1px 5px;font-size:8px;font-weight:bold;">단일토큰 '+w.single_token_cnt+'</span>');
         if(w.mcLabel === 'MICRO') labels.push('<span style="background:#808000;color:#fff;padding:1px 5px;font-size:8px;font-weight:bold;">초소형</span>');
         else if(w.mcLabel === 'SMALL') labels.push('<span style="background:#004080;color:#fff;padding:1px 5px;font-size:8px;font-weight:bold;">소형</span>');
         if(w.is_new) labels.push('<span style="background:#008000;color:#fff;padding:1px 5px;font-size:8px;font-weight:bold;">신규토큰</span>');
