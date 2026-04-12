@@ -1822,7 +1822,7 @@ function analyticsRenderFreq(){
     return;
   }
   var maxCnt = Math.max.apply(null, arr.map(function(r){return Math.max.apply(null,r.spark||[1]);}));
-  var chainColor = {eth:'#627eea',bsc:'#f0b90b',arb:'#28a0f0',base:'#0052ff',poly:'#8247e5'};
+  var chainColor = {eth:'#627eea',bsc:'#f0b90b',arb:'#28a0f0',base:'#0052ff',poly:'#8247e5',sol:'#9945ff'};
   document.getElementById('freqBody').innerHTML = arr.slice(0,100).map(function(r,i){
     var ago = tAgo(r.last_ts/1000);
     var spark = (r.spark||[]).map(function(v){
@@ -1869,7 +1869,7 @@ function analyticsRenderWatchlist(){
     el.innerHTML = '<span style="color:#404040;font-size:11px;">데이터 부족 (DB 쌓이는 중)</span>';
     return;
   }
-  var chainColor = {eth:'#627eea',bsc:'#f0b90b',arb:'#28a0f0',base:'#0052ff',poly:'#8247e5'};
+  var chainColor = {eth:'#627eea',bsc:'#f0b90b',arb:'#28a0f0',base:'#0052ff',poly:'#8247e5',sol:'#9945ff'};
   el.innerHTML = arr.map(function(w, i){
     var scoreColor = w.score >= 70 ? '#800000' : w.score >= 40 ? '#808000' : '#000080';
     var barW = Math.min(100, w.score);
@@ -2765,7 +2765,7 @@ function whaleRender(){
     body.innerHTML = '<tr><td colspan="10" style="padding:30px;text-align:center;color:#404040;">'+(WHALE.rows.length?'필터 결과 없음':'감지된 트랜잭션 없음')+'</td></tr>';
     return;
   }
-  var chainColor = {eth:'#627eea',bsc:'#f0b90b',arb:'#28a0f0',base:'#0052ff',poly:'#8247e5'};
+  var chainColor = {eth:'#627eea',bsc:'#f0b90b',arb:'#28a0f0',base:'#0052ff',poly:'#8247e5',sol:'#9945ff'};
   body.innerHTML = filtered.map(function(r){
     var exp = CHAIN_EXP[r.chain]||'';
     var ago = tAgo(r.ts/1000);
@@ -2902,9 +2902,10 @@ function fmtA(n){return n>=1e9?(n/1e9).toFixed(2)+'B':n>=1e6?(n/1e6).toFixed(2)+
 
 var CHAIN_EXP = {
   eth:'https://etherscan.io', bsc:'https://bscscan.com',
-  arb:'https://arbiscan.io', poly:'https://polygonscan.com', base:'https://basescan.org'
+  arb:'https://arbiscan.io', poly:'https://polygonscan.com', base:'https://basescan.org',
+  sol:'https://solscan.io'
 };
-var CHAIN_NAME = {eth:'ETH',bsc:'BSC',arb:'ARB',poly:'POLY',base:'BASE'};
+var CHAIN_NAME = {eth:'ETH',bsc:'BSC',arb:'ARB',poly:'POLY',base:'BASE',sol:'SOL'};
 var CHAIN_ID   = {eth:1,bsc:56,arb:42161,poly:137,base:8453};
 var CHAIN_BPH  = {eth:7200,bsc:28800,arb:360000,poly:43200,base:43200};
 

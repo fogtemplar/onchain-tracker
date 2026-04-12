@@ -717,7 +717,7 @@ async function getTokenMeta(chain, ca) {
 // 순서: Binance > CoinGecko > CMC > CoinGlass > DexScreener
 // 첫 성공 시 즉시 반환 (API 절약), 실패 시 다음으로
 // 교차 검증: 첫 결과와 DexScreener 비교 (5x 이상 차이면 낮은 쪽)
-const PLATFORM_MAP = {eth:'ethereum',bsc:'binance-smart-chain',arb:'arbitrum-one',base:'base',poly:'polygon-pos'};
+const PLATFORM_MAP = {eth:'ethereum',bsc:'binance-smart-chain',arb:'arbitrum-one',base:'base',poly:'polygon-pos',sol:'solana'};
 
 async function getPrice(symbol, ca, chain) {
   const caLo = (ca || '').toLowerCase();
@@ -1146,6 +1146,311 @@ async function handleLog(chain, log_, source) {
 
 function log_msg(...args) { log(...args); }
 
+// ════════════════════════════════════════════════════════════
+// SOLANA SUPPORT
+// ════════════════════════════════════════════════════════════
+const SOL_WSS = 'wss://api.mainnet-beta.solana.com';
+const SOL_HTTP = 'https://api.mainnet-beta.solana.com';
+const SOL_EXP = 'https://solscan.io';
+
+const SOL_EXCHANGES = [
+  { name:'Binance', addr:'5tzFkiKscXHK5ZXCGbXZxdw7gTjjD1mBwuoFbhUvuAi9' },
+  { name:'Binance', addr:'9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM' },
+  { name:'Binance', addr:'3gB8cY5JfHgKLnqXo94mEn7HZHK7jGDui2De5HzAcsCR' },
+  { name:'OKX',     addr:'5VCwKtCXgCDuQosrzMcUh1p5wfwUHHKhm7wtw5G8XGWu' },
+  { name:'Bybit',   addr:'AC5RDfQFmDS1deWZos921JfqscXdByf6BKHAbfbw3AFF' },
+  { name:'Coinbase',addr:'H8sMJSCQxfKiFTCfDR3DUMLPwcRbM61LGFJ8N4dK3WjS' },
+  { name:'Kraken',  addr:'FWznbcNXWQuHTawe9RxvQ2LdCENssh12dsznf4RiWB7t' },
+  { name:'KuCoin',  addr:'BmFdpraQhkiDQE6SnfG5PVddTtR5yFSb2PVkPsG2FJqH' },
+  { name:'Gate',    addr:'u6PJ8DtQuPFnfmwHbGFULQ4u4EgjDiyYKjVEsynXq2w' },
+  { name:'MEXC',    addr:'ASTyfSima4LLAdDgoFGkgqoKowG1LZFDr9fAQrg7iaJZ' },
+  { name:'Bitget',  addr:'A77HErCMBsHJnM7rxviRMECvSMuok2fNhTmLFHqXR2gf' },
+];
+
+const SOL_EX_MAP = new Map();
+SOL_EXCHANGES.forEach(e => SOL_EX_MAP.set(e.addr, e.name));
+
+async function solRpc(method, params) {
+  const body = JSON.stringify({ jsonrpc: '2.0', method, params, id: 1 });
+  const res = await fetch(SOL_HTTP, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body,
+    signal: AbortSignal.timeout(15000),
+  });
+  const d = await res.json();
+  if (d.error) throw new Error(d.error.message);
+  return d.result;
+}
+
+// Solana 토큰 메타 캐시 (SQLite)
+db.exec(`
+  CREATE TABLE IF NOT EXISTS sol_token_meta (
+    mint TEXT PRIMARY KEY,
+    symbol TEXT NOT NULL,
+    decimals INTEGER NOT NULL DEFAULT 9,
+    updated_at INTEGER NOT NULL
+  )
+`);
+const stmtSolMetaGet = db.prepare('SELECT * FROM sol_token_meta WHERE mint = ?');
+const stmtSolMetaSet = db.prepare('INSERT OR REPLACE INTO sol_token_meta (mint, symbol, decimals, updated_at) VALUES (?, ?, ?, ?)');
+
+async function getSolTokenMeta(mint) {
+  // 1. SQLite 캐시 (7일)
+  try {
+    const row = stmtSolMetaGet.get(mint);
+    if (row && Date.now() - row.updated_at < 7 * 86400000) {
+      return { symbol: row.symbol, decimals: row.decimals };
+    }
+  } catch (e) {}
+
+  // 2. Jupiter Token API
+  try {
+    const r = await fetch(`https://token.jup.ag/strict`, { signal: AbortSignal.timeout(10000) });
+    if (r.ok) {
+      const tokens = await r.json();
+      // 캐시에 모두 저장
+      const tx = db.transaction((list) => {
+        for (const t of list) {
+          try { stmtSolMetaSet.run(t.address, t.symbol, t.decimals, Date.now()); } catch (e) {}
+        }
+      });
+      tx(tokens);
+      const found = tokens.find(t => t.address === mint);
+      if (found) return { symbol: found.symbol, decimals: found.decimals };
+    }
+  } catch (e) { log('Jupiter token list err:', e.message); }
+
+  // 3. RPC 폴백 (decimals만)
+  try {
+    const info = await solRpc('getAccountInfo', [mint, { encoding: 'jsonParsed' }]);
+    const parsed = info?.value?.data?.parsed?.info;
+    if (parsed) {
+      const meta = { symbol: '?', decimals: parsed.decimals || 9 };
+      try { stmtSolMetaSet.run(mint, meta.symbol, meta.decimals, Date.now()); } catch (e) {}
+      return meta;
+    }
+  } catch (e) {}
+  return null;
+}
+
+// Jupiter 토큰 리스트 초기 로드 (부팅 시 1회)
+async function preloadSolTokens() {
+  try {
+    const r = await fetch('https://token.jup.ag/strict', { signal: AbortSignal.timeout(15000) });
+    if (r.ok) {
+      const tokens = await r.json();
+      const tx = db.transaction((list) => {
+        for (const t of list) {
+          try { stmtSolMetaSet.run(t.address, t.symbol, t.decimals, Date.now()); } catch (e) {}
+        }
+      });
+      tx(tokens);
+      log(`[SOL] Jupiter 토큰 ${tokens.length}개 캐시 완료`);
+    }
+  } catch (e) { log('[SOL] Jupiter preload err:', e.message); }
+}
+
+async function handleSolanaTransaction(sig) {
+  const dedup = 'sol-' + sig;
+  if (state.seenHashes.has(dedup)) return;
+  state.seenHashes.add(dedup);
+
+  try {
+    const tx = await solRpc('getTransaction', [sig, {
+      encoding: 'jsonParsed',
+      maxSupportedTransactionVersion: 0,
+      commitment: 'confirmed',
+    }]);
+    if (!tx || !tx.meta || tx.meta.err) return;
+
+    // 모든 instruction에서 SPL 토큰 전송 찾기
+    const allIx = [
+      ...(tx.transaction.message.instructions || []),
+      ...(tx.meta.innerInstructions || []).flatMap(ii => ii.instructions || []),
+    ];
+
+    for (const ix of allIx) {
+      if (ix.program !== 'spl-token' || !ix.parsed) continue;
+      const type = ix.parsed.type;
+      if (type !== 'transfer' && type !== 'transferChecked') continue;
+
+      const info = ix.parsed.info;
+      let mint = null, amt = 0, decimals = 9;
+
+      if (type === 'transferChecked') {
+        mint = info.mint;
+        amt = parseFloat(info.tokenAmount?.uiAmount || 0);
+        decimals = info.tokenAmount?.decimals || 9;
+      } else {
+        // transfer: source 계정에서 mint 추출 필요
+        // preBalance/postBalance에서 mint 찾기
+        const srcIdx = tx.transaction.message.accountKeys.findIndex(
+          k => (k.pubkey || k) === info.source
+        );
+        if (srcIdx >= 0 && tx.meta.preTokenBalances) {
+          const tb = tx.meta.preTokenBalances.find(b => b.accountIndex === srcIdx);
+          if (tb) {
+            mint = tb.mint;
+            decimals = tb.uiTokenAmount?.decimals || 9;
+            amt = parseFloat(info.amount) / Math.pow(10, decimals);
+          }
+        }
+        if (!mint) {
+          // postTokenBalances에서도 시도
+          const dstIdx = tx.transaction.message.accountKeys.findIndex(
+            k => (k.pubkey || k) === info.destination
+          );
+          if (dstIdx >= 0 && tx.meta.postTokenBalances) {
+            const tb = tx.meta.postTokenBalances.find(b => b.accountIndex === dstIdx);
+            if (tb) {
+              mint = tb.mint;
+              decimals = tb.uiTokenAmount?.decimals || 9;
+              amt = parseFloat(info.amount) / Math.pow(10, decimals);
+            }
+          }
+        }
+      }
+
+      if (!mint || amt <= 0) continue;
+
+      // 토큰 메타
+      const meta = await getSolTokenMeta(mint);
+      if (!meta || !meta.symbol || meta.symbol === '?') continue;
+      if (EXCLUDE.has(meta.symbol)) continue;
+
+      // 가격
+      const price = await getPrice(meta.symbol, mint, 'sol');
+      if (!price) continue;
+      const usd = amt * price;
+      if (usd < MIN_USD) continue;
+      if (usd > 1e9) continue; // sanity
+
+      // from/to: authority = 실제 지갑 주소
+      const from = info.authority || info.source || '';
+      const to = info.destination || '';
+      const fromEx = SOL_EX_MAP.get(from) || null;
+      const toEx = SOL_EX_MAP.get(to) || null;
+      if (fromEx && toEx) continue; // 거래소 내부 이체 제외
+
+      const txClass = { type: 'p2p', label: '개인이체', tag: '' };
+      if (fromEx && !toEx) { txClass.type = 'cex_out'; txClass.label = '거래소출금'; txClass.tag = fromEx; }
+      else if (!fromEx && toEx) { txClass.type = 'cex_in'; txClass.label = '거래소입금'; txClass.tag = toEx; }
+
+      state.stats.detected++;
+      const r = {
+        chain: 'sol', sym: meta.symbol, ca: mint, amt, price, usd,
+        from, to, fromEx, toEx, hash: sig, supplyPct: 0,
+        fromAge: '?d', toAge: '?d',
+        fromENS: null, toENS: null,
+        toFlags: null,
+        tx_type: txClass.type,
+        tx_label: txClass.label,
+        tx_tag: txClass.tag,
+        ts: (tx.blockTime || Math.floor(Date.now() / 1000)) * 1000,
+      };
+      log_msg(`[SOL] ${meta.symbol} $${fN(usd)} ${fromEx || from.slice(0,8)}→${toEx || to.slice(0,8)}…`);
+
+      // DB 저장
+      try {
+        stmtInsert.run({
+          ts: r.ts, chain: 'sol', sym: r.sym, ca: r.ca,
+          amt: r.amt, price: r.price, usd: r.usd, supply_pct: 0,
+          ex_from: r.fromEx || null, ex_to: r.toEx || null,
+          addr_from: r.from, addr_to: r.to, hash: r.hash,
+          tx_type: r.tx_type || null, tx_tag: r.tx_tag || null,
+          from_age: null, to_age: null,
+          from_ens: null, to_ens: null,
+          to_flags: null,
+        });
+      } catch (e) {}
+
+      // 메모리 큐
+      state.recentTxs.unshift(r);
+      if (state.recentTxs.length > 200) state.recentTxs = state.recentTxs.slice(0, 200);
+
+      // 브로드캐스트
+      const payload = JSON.stringify({ type: 'tx', data: r });
+      for (const client of state.clients) {
+        if (client.readyState === WebSocket.OPEN) {
+          try { client.send(payload); } catch (e) {}
+        }
+      }
+
+      // 텔레그램
+      const tier = usd >= 1e6 ? '1M+' : usd >= 5e5 ? '500K+' : '100K+';
+      await sendTelegram(
+        `${tier} <b>${meta.symbol}</b> 전송 감지 (SOL)\n\n` +
+        `가치: <b>$${fN(usd)}</b>\n` +
+        `가격: $${price < 1 ? price.toFixed(6) : price.toFixed(4)}\n` +
+        `수량: ${fN(amt)} ${meta.symbol}\n` +
+        `네트워크: Solana\n\n` +
+        `From: <code>${from}</code>${fromEx ? ' (' + fromEx + ')' : ''}\n` +
+        `To: <code>${to}</code>${toEx ? ' (' + toEx + ')' : ''}\n\n` +
+        `<a href="${SOL_EXP}/tx/${sig}">TX 보기</a> · ` +
+        `<a href="${SOL_EXP}/token/${mint}">토큰</a>`
+      );
+    }
+  } catch (e) {
+    if (!e.message?.includes('not found')) log('[SOL] handleTx err:', e.message);
+  }
+}
+
+function connectSolana() {
+  log('[SOL] WebSocket 연결 중...');
+  const ws = new WebSocket(SOL_WSS);
+  state.wsSol = ws;
+  let subCount = 0;
+
+  ws.on('open', () => {
+    log('[SOL] 연결됨 — 거래소 주소 구독 중...');
+    SOL_EXCHANGES.forEach((ex, i) => {
+      ws.send(JSON.stringify({
+        jsonrpc: '2.0',
+        id: 3000 + i,
+        method: 'logsSubscribe',
+        params: [
+          { mentions: [ex.addr] },
+          { commitment: 'confirmed' },
+        ],
+      }));
+    });
+  });
+
+  ws.on('message', async (data) => {
+    try {
+      const msg = JSON.parse(data.toString());
+      if (msg.id != null && msg.result != null) {
+        subCount++;
+        if (subCount === SOL_EXCHANGES.length) {
+          log(`[SOL] 구독 완료 (${subCount}개 거래소)`);
+        }
+        return;
+      }
+      if (msg.method === 'logsNotification') {
+        const sig = msg.params?.result?.value?.signature;
+        if (sig) await handleSolanaTransaction(sig);
+      }
+    } catch (e) {}
+  });
+
+  ws.on('error', (err) => log('[SOL] ws error:', err.message));
+
+  ws.on('close', () => {
+    log('[SOL] 연결 끊김 — 5초 후 재연결...');
+    state.wsSol = null;
+    setTimeout(() => connectSolana(), 5000);
+  });
+
+  const pingTimer = setInterval(() => {
+    if (ws.readyState === WebSocket.OPEN) {
+      try { ws.ping(); } catch (e) {}
+    } else {
+      clearInterval(pingTimer);
+    }
+  }, 30000);
+}
+
 // ── Full mode WebSocket: subscribe to token CAs (Transfer events) ──
 function connectChainFull(chain) {
   const cas = state.caList[chain] || [];
@@ -1263,6 +1568,7 @@ const httpServer = http.createServer(async (req, res) => {
       db_path: DB_PATH,
       chains: {
         full: Object.keys(state.wsFull).map(c => ({ chain: c, connected: state.wsFull[c]?.readyState === WebSocket.OPEN, ca_count: state.caList[c]?.length || 0 })),
+        sol: { connected: state.wsSol?.readyState === WebSocket.OPEN, exchanges: SOL_EXCHANGES.length },
       },
       ca_total: totalCA,
       ca_per_chain: Object.fromEntries(Object.entries(state.caList).map(([k, v]) => [k, v.length])),
@@ -1786,11 +2092,16 @@ httpServer.listen(PORT, () => log(`HTTP+WS server on :${PORT}`));
     }
   }
 
+  // Solana 시작
+  await preloadSolTokens();
+  connectSolana();
+
   await sendTelegram(
     `🚀 <b>Whale Worker 시작</b>\n` +
-    `5체인 WebSocket 연결\n` +
+    `6체인 WebSocket 연결 (EVM 5 + Solana)\n` +
     `임계값: $${fN(MIN_USD)}+\n` +
-    `구독 토큰: ${totalCA}개 CA\n` +
+    `EVM 구독: ${totalCA}개 CA\n` +
+    `SOL 거래소: ${SOL_EXCHANGES.length}개\n` +
     `DEX/Bridge ${DEX_BLACKLIST.size}개 블랙리스트`
   );
 })();
@@ -1799,6 +2110,7 @@ httpServer.listen(PORT, () => log(`HTTP+WS server on :${PORT}`));
 process.on('SIGTERM', () => {
   log('SIGTERM 받음 — 종료');
   Object.values(state.wsFull).forEach(ws => { try { ws.close(); } catch (e) {} });
+  if (state.wsSol) try { state.wsSol.close(); } catch (e) {}
   try { db.close(); } catch (e) {}
   process.exit(0);
 });
