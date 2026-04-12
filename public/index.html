@@ -2071,6 +2071,7 @@ setTimeout(async function(){
     // Railway 모드면 즉시 연결 (CA 매핑/Binance 빌드 불필요 — 워커가 다 함)
     if(RAILWAY_WS_URL){
       if(!WHALE.active) whaleStart();
+      setTimeout(function(){ analyticsRefresh(); }, 2000);
       return;
     }
     // 폴백: Alchemy 직접 모드 (Railway URL 없을 때만)
