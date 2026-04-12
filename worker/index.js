@@ -1201,6 +1201,7 @@ const httpServer = http.createServer(async (req, res) => {
         SELECT
           sym,
           chain,
+          ca,
           COUNT(*) AS cnt,
           SUM(usd) AS total_usd,
           AVG(usd) AS avg_usd,

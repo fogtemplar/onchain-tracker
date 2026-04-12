@@ -1830,7 +1830,7 @@ function analyticsRenderFreq(){
       var c = v >= maxCnt*0.7 ? '#800000' : v >= maxCnt*0.3 ? '#808000' : '#000080';
       return '<span class="spark-bar" style="height:'+h+'px;background:'+c+';" title="'+v+'건"></span>';
     }).join('');
-    return '<tr style="cursor:pointer;" onclick="analyticsTokenDetail(\''+r.sym+'\',\''+r.chain+'\')">'+
+    return '<tr style="cursor:pointer;" onclick="analyticsTokenDetail(\''+r.sym+'\',\''+r.chain+'\',\''+(r.ca||'')+'\')">'+
       '<td style="text-align:center;color:#404040;">'+(i+1)+'</td>'+
       '<td style="font-weight:bold;">'+r.sym+'</td>'+
       '<td><span style="color:'+(chainColor[r.chain]||'#000')+';font-weight:bold;">'+r.chain.toUpperCase()+'</span></td>'+
@@ -1881,7 +1881,9 @@ function analyticsRenderWatchlist(){
     var mcStr = w.mc > 0 ? '$'+fN(w.mc) : '—';
     var fdvStr = w.fdv > 0 ? '$'+fN(w.fdv) : '—';
     var mcColor = w.mc > 0 && w.mc < 10e6 ? '#800080' : w.mc > 0 && w.mc < 50e6 ? '#808000' : '#000';
-    return '<div style="background:#fff;box-shadow:inset 1px 1px 0 #808080,inset -1px -1px 0 #fff;padding:8px 10px;">'+
+    var ca = w.ca || '';
+    var clickAttr = ca ? ' onclick="runFullSmtAnalysis(&quot;'+ca+'&quot;,&quot;'+w.chain+'&quot;)" style="cursor:pointer;' : ' style="';
+    return '<div'+clickAttr+'background:#fff;box-shadow:inset 1px 1px 0 #808080,inset -1px -1px 0 #fff;padding:8px 10px;">'+
       '<div style="display:flex;align-items:center;gap:4px;margin-bottom:4px;">'+
         '<span style="font-size:10px;color:#404040;min-width:18px;">#'+(i+1)+'</span>'+
         '<span style="font-size:13px;font-weight:bold;color:#000;">'+w.sym+'</span>'+
@@ -1912,9 +1914,12 @@ function analyticsRefresh(){
   analyticsLoadWatchlist();
 }
 
-function analyticsTokenDetail(sym, chain){
-  // TODO: 클릭 시 해당 토큰의 모든 트랜잭션 표시
-  alert(sym+' / '+chain.toUpperCase()+'\n\n상세 화면 추후 추가 예정');
+function analyticsTokenDetail(sym, chain, ca){
+  if(ca && ca.startsWith('0x')){
+    runFullSmtAnalysis(ca, chain);
+  } else {
+    alert(sym+' / '+chain.toUpperCase()+'\n\nCA 정보 없음 — 수동으로 입력해주세요');
+  }
 }
 
 // 자동 새로고침
