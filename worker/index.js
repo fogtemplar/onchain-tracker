@@ -76,13 +76,14 @@ try { db.exec('ALTER TABLE txs ADD COLUMN from_age TEXT'); } catch (e) {}
 try { db.exec('ALTER TABLE txs ADD COLUMN to_age TEXT'); } catch (e) {}
 try { db.exec('ALTER TABLE txs ADD COLUMN from_ens TEXT'); } catch (e) {}
 try { db.exec('ALTER TABLE txs ADD COLUMN to_ens TEXT'); } catch (e) {}
+try { db.exec('ALTER TABLE txs ADD COLUMN to_flags TEXT'); } catch (e) {}
 const dbCount = db.prepare('SELECT COUNT(*) AS c FROM txs').get().c;
 console.log(`[DB] SQLite at ${DB_PATH} — ${dbCount} rows`);
 
 // Prepared statements
 const stmtInsert = db.prepare(`
-  INSERT OR IGNORE INTO txs (ts, chain, sym, ca, amt, price, usd, supply_pct, ex_from, ex_to, addr_from, addr_to, hash, tx_type, tx_tag, from_age, to_age, from_ens, to_ens)
-  VALUES (@ts, @chain, @sym, @ca, @amt, @price, @usd, @supply_pct, @ex_from, @ex_to, @addr_from, @addr_to, @hash, @tx_type, @tx_tag, @from_age, @to_age, @from_ens, @to_ens)
+  INSERT OR IGNORE INTO txs (ts, chain, sym, ca, amt, price, usd, supply_pct, ex_from, ex_to, addr_from, addr_to, hash, tx_type, tx_tag, from_age, to_age, from_ens, to_ens, to_flags)
+  VALUES (@ts, @chain, @sym, @ca, @amt, @price, @usd, @supply_pct, @ex_from, @ex_to, @addr_from, @addr_to, @hash, @tx_type, @tx_tag, @from_age, @to_age, @from_ens, @to_ens, @to_flags)
 `);
 const stmtRecent = db.prepare(`SELECT * FROM txs ORDER BY ts DESC LIMIT ?`);
 const stmtFilter = db.prepare(`
@@ -473,6 +474,50 @@ async function getWalletAge(chain, addr) {
     }
   } catch (e) {}
   return null;
+}
+
+// ── 단일토큰 지갑 체크 (Etherscan V2 + SQLite 캐시) ──
+db.exec(`
+  CREATE TABLE IF NOT EXISTS single_token_cache (
+    chain_addr TEXT PRIMARY KEY,
+    is_single INTEGER NOT NULL,
+    token_ca TEXT,
+    updated_at INTEGER NOT NULL
+  )
+`);
+const stmtSingleGet = db.prepare('SELECT is_single, token_ca, updated_at FROM single_token_cache WHERE chain_addr = ?');
+const stmtSingleSet = db.prepare('INSERT OR REPLACE INTO single_token_cache (chain_addr, is_single, token_ca, updated_at) VALUES (?, ?, ?, ?)');
+
+async function checkSingleToken(chain, addr, currentCA) {
+  const key = `${chain}:${addr.toLowerCase()}`;
+
+  // 1. SQLite 캐시 (1일 TTL)
+  try {
+    const row = stmtSingleGet.get(key);
+    if (row && Date.now() - row.updated_at < 86400000) {
+      // 캐시된 결과가 현재 토큰과 같으면 단일토큰
+      return row.is_single === 1 && row.token_ca === currentCA.toLowerCase();
+    }
+  } catch (e) {}
+
+  // 2. Etherscan V2 — 최근 토큰 전송 조회
+  const cid = CHAIN_ID[chain];
+  if (!cid) return false;
+  try {
+    const url = `https://api.etherscan.io/v2/api?chainid=${cid}&module=account&action=tokentx&address=${addr}&page=1&offset=20&sort=desc&apikey=${ETH_KEY}`;
+    const r = await fetch(url, { signal: AbortSignal.timeout(8000) });
+    if (!r.ok) return false;
+    const d = await r.json();
+    if (d.status !== '1' || !d.result?.length) {
+      // 토큰 TX 없음 = 첫 수신 → 단일토큰
+      try { stmtSingleSet.run(key, 1, currentCA.toLowerCase(), Date.now()); } catch (e) {}
+      return true;
+    }
+    const uniqueTokens = new Set(d.result.map(tx => tx.contractAddress.toLowerCase()));
+    const isSingle = uniqueTokens.size === 1 && uniqueTokens.has(currentCA.toLowerCase());
+    try { stmtSingleSet.run(key, isSingle ? 1 : 0, currentCA.toLowerCase(), Date.now()); } catch (e) {}
+    return isSingle;
+  } catch (e) { return false; }
 }
 
 function formatAge(age) {
@@ -949,8 +994,9 @@ function formatMessage(r) {
     `🔗 네트워크: ${CHAINS[r.chain].name}\n` +
     `🕐 ${new Date(r.ts).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' })}\n\n` +
     `🏦 From: ${r.fromENS ? '<b>' + r.fromENS + '</b> ' : ''}<code>${r.from}</code>${r.fromEx ? ' (' + r.fromEx + ')' : ''} [${r.fromAge}]\n` +
-    `👤 To: ${r.toENS ? '<b>' + r.toENS + '</b> ' : ''}<code>${r.to}</code>${r.toEx ? ' (' + r.toEx + ')' : ''} [${r.toAge}]\n\n` +
-    `<a href="${CHAINS[r.chain].exp}/tx/${r.hash}">TX 보기</a> · ` +
+    `👤 To: ${r.toENS ? '<b>' + r.toENS + '</b> ' : ''}<code>${r.to}</code>${r.toEx ? ' (' + r.toEx + ')' : ''} [${r.toAge}]\n` +
+    (r.toFlags?.length ? `⚠️ <b>${r.toFlags.join(' ')}</b>\n` : '') +
+    `\n<a href="${CHAINS[r.chain].exp}/tx/${r.hash}">TX 보기</a> · ` +
     `<a href="${CHAINS[r.chain].exp}/token/${r.ca}">토큰</a>`;
 }
 
@@ -1043,12 +1089,21 @@ async function handleLog(chain, log_, source) {
       resolveENS(to).catch(() => null),
     ]);
 
+    // ── 수신자 플래그 ──
+    const toFlags = [];
+    // 1) 신규지갑 (30일 이내 생성)
+    if (toAge && toAge.days <= 30) toFlags.push('🆕신규지갑');
+    // 2) 단일토큰 지갑 (해당 코인만 보유)
+    const singleToken = await checkSingleToken(chain, to, ca).catch(() => false);
+    if (singleToken) toFlags.push('🎯단일토큰');
+
     state.stats.detected++;
     const r = {
       chain, sym: meta.symbol, ca, amt, price, usd,
       from, to, fromEx, toEx, hash, supplyPct,
       fromAge: formatAge(fromAge), toAge: formatAge(toAge),
       fromENS: fromENS || null, toENS: toENS || null,
+      toFlags: toFlags.length ? toFlags : null,
       tx_type: txClass.type,
       tx_label: txClass.label,
       tx_tag: txClass.tag,
@@ -1066,6 +1121,7 @@ async function handleLog(chain, log_, source) {
         tx_type: r.tx_type || null, tx_tag: r.tx_tag || null,
         from_age: r.fromAge || null, to_age: r.toAge || null,
         from_ens: r.fromENS || null, to_ens: r.toENS || null,
+        to_flags: r.toFlags ? r.toFlags.join(',') : null,
       });
     } catch (e) { console.warn('db insert err:', e.message); }
 
@@ -1247,7 +1303,7 @@ const httpServer = http.createServer(async (req, res) => {
         from: row.addr_from, to: row.addr_to,
         fromEx: row.ex_from, toEx: row.ex_to, hash: row.hash,
         tx_type: row.tx_type, tx_tag: row.tx_tag,
-        fromAge: row.from_age, toAge: row.to_age, fromENS: row.from_ens, toENS: row.to_ens,
+        fromAge: row.from_age, toAge: row.to_age, fromENS: row.from_ens, toENS: row.to_ens, toFlags: row.to_flags ? row.to_flags.split(',') : null,
       }));
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ ok: true, count: data.length, data }));
@@ -1641,7 +1697,7 @@ wss.on('connection', (clientWs, req) => {
       from: row.addr_from, to: row.addr_to,
       fromEx: row.ex_from, toEx: row.ex_to, hash: row.hash,
       tx_type: row.tx_type, tx_tag: row.tx_tag,
-      fromAge: row.from_age, toAge: row.to_age, fromENS: row.from_ens, toENS: row.to_ens,
+      fromAge: row.from_age, toAge: row.to_age, fromENS: row.from_ens, toENS: row.to_ens, toFlags: row.to_flags ? row.to_flags.split(',') : null,
     }));
     const total = db.prepare('SELECT COUNT(*) AS c FROM txs').get().c;
     clientWs.send(JSON.stringify({

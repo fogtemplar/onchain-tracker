@@ -2770,7 +2770,8 @@ function whaleRender(){
     var fromAgeStr = r.fromAge ? ' <span style="font-size:9px;color:#808080;font-weight:bold;">['+r.fromAge+']</span>' : '';
     var toAgeStr = r.toAge ? ' <span style="font-size:9px;color:#808080;font-weight:bold;">['+r.toAge+']</span>' : '';
     var fromLinks = '<a href="'+exp+'/address/'+r.from+'" target="_blank" style="font-family:monospace;color:#0000ff;font-size:10px;">'+fromLabel+'</a>'+fromAgeStr+' <a href="https://debank.com/profile/'+r.from+'" target="_blank" style="font-size:9px;color:#008000;">(DeBank)</a>';
-    var toLinks = '<a href="'+exp+'/address/'+r.to+'" target="_blank" style="font-family:monospace;color:#0000ff;font-size:10px;">'+toLabel+'</a>'+toAgeStr+' <a href="https://debank.com/profile/'+r.to+'" target="_blank" style="font-size:9px;color:#008000;">(DeBank)</a>';
+    var toFlagStr = r.toFlags && r.toFlags.length ? ' <span style="font-size:9px;color:#800000;font-weight:bold;">'+r.toFlags.join(' ')+'</span>' : '';
+    var toLinks = '<a href="'+exp+'/address/'+r.to+'" target="_blank" style="font-family:monospace;color:#0000ff;font-size:10px;">'+toLabel+'</a>'+toAgeStr+toFlagStr+' <a href="https://debank.com/profile/'+r.to+'" target="_blank" style="font-size:9px;color:#008000;">(DeBank)</a>';
     return '<tr>'+
       '<td style="white-space:nowrap;">'+ago+'</td>'+
       '<td><span style="color:'+(chainColor[r.chain]||'#000')+';font-weight:bold;">'+r.chain.toUpperCase()+'</span></td>'+
