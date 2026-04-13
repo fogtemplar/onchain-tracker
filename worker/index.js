@@ -2151,9 +2151,9 @@ httpServer.listen(PORT, () => log(`HTTP+WS server on :${PORT}`));
     }
   }
 
-  // Solana 시작 (Full 모드: 토큰 mint 기반)
-  await preloadSolTokens();
-  connectSolanaFull();
+  // Solana는 공용 RPC 한계로 비활성화 (Helius 필요)
+  // await preloadSolTokens();
+  // connectSolanaFull();
 
   await sendTelegram(
     `🚀 <b>Whale Worker 시작</b>\n` +
