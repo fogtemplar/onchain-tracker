@@ -1735,6 +1735,16 @@ window.addEventListener('DOMContentLoaded', function(){
           <option value="supplyPct">공급%순</option>
         </select>
         <span id="whaleFilterCount" style="font-size:10px;color:#404040;"></span>
+        <label style="font-size:10px;color:#000;margin-left:8px;border-left:1px solid #808080;padding-left:8px;">
+          <input type="checkbox" id="ttsEnabled" onchange="ttsToggle()" style="vertical-align:middle;"> 🔊 음성알림
+        </label>
+        <select id="ttsMinUsd" onchange="ttsSaveSettings()" style="font-size:10px;">
+          <option value="100000">$100K+</option>
+          <option value="500000">$500K+</option>
+          <option value="1000000" selected>$1M+</option>
+          <option value="5000000">$5M+</option>
+        </select>
+        <button onclick="ttsTest()" style="font-size:10px;cursor:pointer;">🎤 테스트</button>
       </div>
     </div>
   </div>
@@ -2438,6 +2448,95 @@ function whaleToggle(){
   else whaleStart();
 }
 
+// ════════════════════════════════════════════
+// TTS 음성 알림
+// ════════════════════════════════════════════
+var TTS = {
+  enabled: false,
+  minUsd: 1000000,
+  queue: [],
+  speaking: false,
+  lastHashes: new Set()
+};
+
+function ttsInit(){
+  try {
+    TTS.enabled = localStorage.getItem('tts_enabled') === '1';
+    TTS.minUsd = parseInt(localStorage.getItem('tts_min_usd') || '1000000');
+  } catch(e){}
+  var cb = document.getElementById('ttsEnabled');
+  if(cb) cb.checked = TTS.enabled;
+  var sel = document.getElementById('ttsMinUsd');
+  if(sel) sel.value = String(TTS.minUsd);
+}
+
+function ttsToggle(){
+  var cb = document.getElementById('ttsEnabled');
+  TTS.enabled = !!cb?.checked;
+  try { localStorage.setItem('tts_enabled', TTS.enabled ? '1' : '0'); } catch(e){}
+  if(TTS.enabled){
+    // 사용자 클릭 이벤트 안에서 첫 발화 → 브라우저 오디오 권한 확보
+    ttsSpeak('음성 알림이 활성화되었습니다');
+  }
+}
+
+function ttsSaveSettings(){
+  var sel = document.getElementById('ttsMinUsd');
+  if(sel) TTS.minUsd = parseInt(sel.value);
+  try { localStorage.setItem('tts_min_usd', String(TTS.minUsd)); } catch(e){}
+}
+
+function ttsTest(){
+  var cb = document.getElementById('ttsEnabled');
+  if(cb && !cb.checked){ cb.checked = true; ttsToggle(); }
+  ttsSpeak('테스트 알림입니다. BTC 백만달러 거래소 출금.');
+}
+
+function ttsSpeak(text){
+  if(!('speechSynthesis' in window)) return;
+  try {
+    var u = new SpeechSynthesisUtterance(text);
+    u.lang = 'ko-KR';
+    u.rate = 1.1;
+    u.volume = 1.0;
+    window.speechSynthesis.speak(u);
+  } catch(e){ console.warn('tts err:', e); }
+}
+
+function ttsFormatUsd(usd){
+  if(usd >= 1e9) return (usd/1e9).toFixed(1)+'십억';
+  if(usd >= 1e6) return (usd/1e6).toFixed(1)+'백만';
+  if(usd >= 1e3) return (usd/1e3).toFixed(0)+'천';
+  return String(Math.floor(usd));
+}
+
+function ttsSpeakTx(r){
+  if(!TTS.enabled) return;
+  if(!r || !r.usd) return;
+  if(r.usd < TTS.minUsd) return;
+  // 중복 방지
+  var key = r.chain+':'+r.hash+':'+r.from+':'+r.to;
+  if(TTS.lastHashes.has(key)) return;
+  TTS.lastHashes.add(key);
+  if(TTS.lastHashes.size > 500){
+    TTS.lastHashes = new Set(Array.from(TTS.lastHashes).slice(-300));
+  }
+
+  var chainName = {eth:'이더',bsc:'비엔비',arb:'아비트럼',base:'베이스',poly:'폴리곤',sol:'솔라나'}[r.chain] || r.chain;
+  var typeStr = '';
+  if(r.tx_type === 'cex_out') typeStr = (r.tx_tag||r.fromEx||'거래소')+' 출금';
+  else if(r.tx_type === 'cex_in') typeStr = (r.tx_tag||r.toEx||'거래소')+' 입금';
+  else if(r.tx_type === 'dex_swap') typeStr = '덱스 스왑';
+  else if(r.tx_type === 'bridge') typeStr = '브리지';
+  else typeStr = '개인 이체';
+
+  var text = chainName+' '+r.sym+' '+ttsFormatUsd(r.usd)+'달러 '+typeStr;
+  ttsSpeak(text);
+}
+
+// 페이지 로드 시 설정 복원
+setTimeout(ttsInit, 500);
+
 function whaleSetRailwayUrl(){
   var cur = RAILWAY_WS_URL || 'wss://your-worker.up.railway.app/ws';
   var v = prompt('Railway 워커 WebSocket URL:\n(예: wss://onchain-tracker-production.up.railway.app/ws)', cur);
@@ -2554,6 +2653,7 @@ async function whaleConnectRailway(){
         if(r.usd >= 1000000 && typeof showToast === 'function'){
           showToast('🔴 1M+ 전송', r.sym+' '+fN(r.amt)+' ($'+fN(r.usd)+') '+r.fromEx, true);
         }
+        ttsSpeakTx(r);
       }
     } catch(e){ console.warn('railway ws msg err:', e); }
   };
