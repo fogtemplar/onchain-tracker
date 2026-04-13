@@ -370,10 +370,10 @@ const state = {
   binanceWL: null,
   binanceWLts: 0,
   seenHashes: new Set(),
-  stats: { detected: 0, sent: 0, errors: 0, startedAt: Date.now() },
+  stats: { detected: 0, sent: 0, errors: 0, startedAt: Date.now(), solMsgs: 0, solNotifs: 0, solSubs: 0, solParsed: 0 },
   recentTxs: [],
   clients: new Set(),
-  caList: { eth: [], bsc: [], arb: [], base: [], poly: [] },  // 풀모드 CA 구독 대상
+  caList: { eth: [], bsc: [], arb: [], base: [], poly: [], sol: [] },  // 풀모드 CA 구독 대상
   caListTs: 0,
   lpAddresses: new Set(),    // 동적으로 감지된 LP/pair (handleLog에서 제외)
 };
@@ -1259,6 +1259,7 @@ async function handleSolanaTransaction(sig) {
     }]);
     if (!tx || !tx.meta || tx.meta.err) return;
 
+    state.stats.solParsed++;
     // 모든 instruction에서 SPL 토큰 전송 찾기
     const allIx = [
       ...(tx.transaction.message.instructions || []),
@@ -1426,9 +1427,12 @@ function connectSolanaFull() {
     });
 
     ws.on('message', async (data) => {
+      state.stats.solMsgs++;
       try {
         const msg = JSON.parse(data.toString());
+        if (msg.id != null && msg.result != null) state.stats.solSubs++;
         if (msg.method === 'logsNotification') {
+          state.stats.solNotifs++;
           const sig = msg.params?.result?.value?.signature;
           if (sig) await handleSolanaTransaction(sig);
         }
@@ -1442,7 +1446,6 @@ function connectSolanaFull() {
       setTimeout(() => {
         const idx = state.wsSolFull.indexOf(ws);
         if (idx >= 0) state.wsSolFull.splice(idx, 1);
-        // 재연결: 같은 청크
         connectSolanaFullChunk(chunk, ci);
       }, 10000);
     });
@@ -1470,9 +1473,12 @@ function connectSolanaFullChunk(chunk, ci) {
     });
   });
   ws.on('message', async (data) => {
+    state.stats.solMsgs++;
     try {
       const msg = JSON.parse(data.toString());
+      if (msg.id != null && msg.result != null) state.stats.solSubs++;
       if (msg.method === 'logsNotification') {
+        state.stats.solNotifs++;
         const sig = msg.params?.result?.value?.signature;
         if (sig) await handleSolanaTransaction(sig);
       }
@@ -1610,6 +1616,10 @@ const httpServer = http.createServer(async (req, res) => {
         sol: {
           connections: (state.wsSolFull || []).filter(ws => ws.readyState === WebSocket.OPEN).length,
           mints: (state.caList.sol || []).length,
+          msgs: state.stats.solMsgs,
+          subs: state.stats.solSubs,
+          notifs: state.stats.solNotifs,
+          parsed: state.stats.solParsed,
         },
       },
       ca_total: totalCA,
