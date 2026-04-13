@@ -2525,8 +2525,8 @@ function ttsSpeakTx(r){
   }
   console.log('[TTS] speaking:', r.chain, r.sym, '$'+r.usd);
 
-  // $1M 이상이면 사이렌 먼저 재생
-  if(r.usd >= 1000000) ttsPlaySiren();
+  // 사이렌 먼저 재생 (모든 임계값 통과 건)
+  ttsPlaySiren();
 
   var chainName = {eth:'이더',bsc:'비엔비',arb:'아비트럼',base:'베이스',poly:'폴리곤',sol:'솔라나'}[r.chain] || r.chain;
   var typeStr = '';
@@ -2537,9 +2537,8 @@ function ttsSpeakTx(r){
   else typeStr = '개인 이체';
 
   var text = chainName+' '+r.sym+' '+ttsFormatUsd(r.usd)+'달러 '+typeStr;
-  // 사이렌 후 TTS는 살짝 딜레이
-  if(r.usd >= 1000000) setTimeout(function(){ ttsSpeak(text); }, 1800);
-  else ttsSpeak(text);
+  // 사이렌 후 TTS
+  setTimeout(function(){ ttsSpeak(text); }, 1800);
 }
 
 // Web Audio API로 사이렌 소리 생성 (1.5초간 up-down sweep 2회)
