@@ -2513,16 +2513,17 @@ function ttsFormatUsd(usd){
 }
 
 function ttsSpeakTx(r){
-  if(!TTS.enabled) return;
-  if(!r || !r.usd) return;
-  if(r.usd < TTS.minUsd) return;
+  if(!TTS.enabled){ console.log('[TTS] skip: disabled'); return; }
+  if(!r || !r.usd){ console.log('[TTS] skip: no usd'); return; }
+  if(r.usd < TTS.minUsd){ console.log('[TTS] skip: under threshold', r.usd, '<', TTS.minUsd); return; }
   // 중복 방지
   var key = r.chain+':'+r.hash+':'+r.from+':'+r.to;
-  if(TTS.lastHashes.has(key)) return;
+  if(TTS.lastHashes.has(key)){ console.log('[TTS] skip: dup', key); return; }
   TTS.lastHashes.add(key);
   if(TTS.lastHashes.size > 500){
     TTS.lastHashes = new Set(Array.from(TTS.lastHashes).slice(-300));
   }
+  console.log('[TTS] speaking:', r.chain, r.sym, '$'+r.usd);
 
   // $1M 이상이면 사이렌 먼저 재생
   if(r.usd >= 1000000) ttsPlaySiren();
@@ -2679,7 +2680,10 @@ async function whaleConnectRailway(){
     try {
       var msg = JSON.parse(ev.data);
       if(msg.type === 'init'){
-        // 이미 history HTTP로 로드했으면 빈 경우만 처리
+        // init 데이터는 과거 tx이므로 TTS 재생 방지 — lastHashes에 등록
+        (msg.data||[]).forEach(function(r){
+          if(r && r.hash) TTS.lastHashes.add(r.chain+':'+r.hash+':'+r.from+':'+r.to);
+        });
         if(WHALE.rows.length === 0){
           WHALE.rows = (msg.data||[]).slice();
           document.getElementById('whaleTotal').textContent = WHALE.rows.length;
@@ -2693,8 +2697,11 @@ async function whaleConnectRailway(){
             '🟢 Railway 실시간 — 가동 '+Math.floor(msg.stats.uptime/60)+'분, 누적 '+msg.stats.detected+'건'+dbStr;
         }
       } else if(msg.type === 'tx'){
-        // 신규 트랜잭션 (중복 체크)
+        // 신규 트랜잭션
         var r = msg.data;
+        // TTS는 먼저 시도 (내부 lastHashes로 중복 방지)
+        try { ttsSpeakTx(r); } catch(e){ console.warn('tts err:', e); }
+        // WHALE.rows 중복 체크 후 추가
         if(WHALE.rows.find(function(x){return x.hash===r.hash && x.from===r.from && x.to===r.to;})) return;
         WHALE.rows.unshift(r);
         if(WHALE.rows.length > 1000) WHALE.rows = WHALE.rows.slice(0, 1000);
@@ -2705,7 +2712,6 @@ async function whaleConnectRailway(){
         if(r.usd >= 1000000 && typeof showToast === 'function'){
           showToast('🔴 1M+ 전송', r.sym+' '+fN(r.amt)+' ($'+fN(r.usd)+') '+r.fromEx, true);
         }
-        ttsSpeakTx(r);
       }
     } catch(e){ console.warn('railway ws msg err:', e); }
   };
