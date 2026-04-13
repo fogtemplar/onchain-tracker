@@ -2461,9 +2461,10 @@ var TTS = {
 
 function ttsInit(){
   try {
-    TTS.enabled = localStorage.getItem('tts_enabled') === '1';
+    var saved = localStorage.getItem('tts_enabled');
+    TTS.enabled = saved === null ? true : saved === '1';
     TTS.minUsd = parseInt(localStorage.getItem('tts_min_usd') || '1000000');
-  } catch(e){}
+  } catch(e){ TTS.enabled = true; }
   var cb = document.getElementById('ttsEnabled');
   if(cb) cb.checked = TTS.enabled;
   var sel = document.getElementById('ttsMinUsd');
