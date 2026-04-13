@@ -2515,7 +2515,6 @@ function ttsFormatUsd(usd){
 function ttsSpeakTx(r){
   if(!TTS.enabled){ console.log('[TTS] skip: disabled'); return; }
   if(!r || !r.usd){ console.log('[TTS] skip: no usd'); return; }
-  if(r.usd < TTS.minUsd){ console.log('[TTS] skip: under threshold', r.usd, '<', TTS.minUsd); return; }
   // 중복 방지
   var key = r.chain+':'+r.hash+':'+r.from+':'+r.to;
   if(TTS.lastHashes.has(key)){ console.log('[TTS] skip: dup', key); return; }
