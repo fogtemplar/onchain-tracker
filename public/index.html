@@ -2490,7 +2490,8 @@ function ttsSaveSettings(){
 function ttsTest(){
   var cb = document.getElementById('ttsEnabled');
   if(cb && !cb.checked){ cb.checked = true; ttsToggle(); }
-  ttsSpeak('테스트 알림입니다. BTC 백만달러 거래소 출금.');
+  ttsPlaySiren();
+  setTimeout(function(){ ttsSpeak('테스트 알림입니다. 이더 BTC 백만달러 거래소 출금.'); }, 1800);
 }
 
 function ttsSpeak(text){
@@ -2523,6 +2524,9 @@ function ttsSpeakTx(r){
     TTS.lastHashes = new Set(Array.from(TTS.lastHashes).slice(-300));
   }
 
+  // $1M 이상이면 사이렌 먼저 재생
+  if(r.usd >= 1000000) ttsPlaySiren();
+
   var chainName = {eth:'이더',bsc:'비엔비',arb:'아비트럼',base:'베이스',poly:'폴리곤',sol:'솔라나'}[r.chain] || r.chain;
   var typeStr = '';
   if(r.tx_type === 'cex_out') typeStr = (r.tx_tag||r.fromEx||'거래소')+' 출금';
@@ -2532,7 +2536,54 @@ function ttsSpeakTx(r){
   else typeStr = '개인 이체';
 
   var text = chainName+' '+r.sym+' '+ttsFormatUsd(r.usd)+'달러 '+typeStr;
-  ttsSpeak(text);
+  // 사이렌 후 TTS는 살짝 딜레이
+  if(r.usd >= 1000000) setTimeout(function(){ ttsSpeak(text); }, 1800);
+  else ttsSpeak(text);
+}
+
+// Web Audio API로 사이렌 소리 생성 (1.5초간 up-down sweep 2회)
+var _audioCtx = null;
+function ttsPlaySiren(){
+  try {
+    if(!_audioCtx){
+      _audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    }
+    var ctx = _audioCtx;
+    if(ctx.state === 'suspended') ctx.resume();
+
+    var now = ctx.currentTime;
+    var duration = 1.5;
+
+    // 오실레이터 (톱니파로 더 자극적)
+    var osc = ctx.createOscillator();
+    osc.type = 'sawtooth';
+
+    // 게인 (볼륨 조절)
+    var gain = ctx.createGain();
+    gain.gain.setValueAtTime(0, now);
+    gain.gain.linearRampToValueAtTime(0.25, now + 0.05);
+    gain.gain.setValueAtTime(0.25, now + duration - 0.1);
+    gain.gain.linearRampToValueAtTime(0, now + duration);
+
+    // 필터로 날카로움 완화
+    var filter = ctx.createBiquadFilter();
+    filter.type = 'lowpass';
+    filter.frequency.value = 2000;
+
+    osc.connect(filter);
+    filter.connect(gain);
+    gain.connect(ctx.destination);
+
+    // 주파수 스윕: 사이렌 소리 (700Hz ↔ 1400Hz 왕복)
+    osc.frequency.setValueAtTime(700, now);
+    osc.frequency.linearRampToValueAtTime(1400, now + 0.375);
+    osc.frequency.linearRampToValueAtTime(700, now + 0.75);
+    osc.frequency.linearRampToValueAtTime(1400, now + 1.125);
+    osc.frequency.linearRampToValueAtTime(700, now + 1.5);
+
+    osc.start(now);
+    osc.stop(now + duration);
+  } catch(e){ console.warn('siren err:', e); }
 }
 
 // 페이지 로드 시 설정 복원
