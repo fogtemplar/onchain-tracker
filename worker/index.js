@@ -1433,8 +1433,12 @@ function connectSolanaFull() {
         if (msg.id != null && msg.result != null) state.stats.solSubs++;
         if (msg.method === 'logsNotification') {
           state.stats.solNotifs++;
-          const sig = msg.params?.result?.value?.signature;
-          if (sig) await handleSolanaTransaction(sig);
+          const v = msg.params?.result?.value;
+          if (!v || v.err) return;
+          // 사전 필터: TransferChecked만 처리 (Transfer는 mint 미참조라 어차피 못 옴)
+          const hasTransfer = (v.logs || []).some(l => l.includes('TransferChecked'));
+          if (!hasTransfer) return;
+          if (v.signature) await handleSolanaTransaction(v.signature);
         }
       } catch (e) {}
     });
@@ -1479,8 +1483,11 @@ function connectSolanaFullChunk(chunk, ci) {
       if (msg.id != null && msg.result != null) state.stats.solSubs++;
       if (msg.method === 'logsNotification') {
         state.stats.solNotifs++;
-        const sig = msg.params?.result?.value?.signature;
-        if (sig) await handleSolanaTransaction(sig);
+        const v = msg.params?.result?.value;
+        if (!v || v.err) return;
+        const hasTransfer = (v.logs || []).some(l => l.includes('TransferChecked'));
+        if (!hasTransfer) return;
+        if (v.signature) await handleSolanaTransaction(v.signature);
       }
     } catch (e) {}
   });
