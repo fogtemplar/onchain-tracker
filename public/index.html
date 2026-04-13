@@ -1739,9 +1739,9 @@ window.addEventListener('DOMContentLoaded', function(){
           <input type="checkbox" id="ttsEnabled" onchange="ttsToggle()" style="vertical-align:middle;"> 🔊 음성알림
         </label>
         <select id="ttsMinUsd" onchange="ttsSaveSettings()" style="font-size:10px;">
-          <option value="100000">$100K+</option>
+          <option value="100000" selected>$100K+</option>
           <option value="500000">$500K+</option>
-          <option value="1000000" selected>$1M+</option>
+          <option value="1000000">$1M+</option>
           <option value="5000000">$5M+</option>
         </select>
         <button onclick="ttsTest()" style="font-size:10px;cursor:pointer;">🎤 테스트</button>
@@ -2453,7 +2453,7 @@ function whaleToggle(){
 // ════════════════════════════════════════════
 var TTS = {
   enabled: false,
-  minUsd: 1000000,
+  minUsd: 100000,
   queue: [],
   speaking: false,
   lastHashes: new Set()
@@ -2463,7 +2463,7 @@ function ttsInit(){
   try {
     var saved = localStorage.getItem('tts_enabled');
     TTS.enabled = saved === null ? true : saved === '1';
-    TTS.minUsd = parseInt(localStorage.getItem('tts_min_usd') || '1000000');
+    TTS.minUsd = parseInt(localStorage.getItem('tts_min_usd') || '100000');
   } catch(e){ TTS.enabled = true; }
   var cb = document.getElementById('ttsEnabled');
   if(cb) cb.checked = TTS.enabled;
