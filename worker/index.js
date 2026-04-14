@@ -82,6 +82,29 @@ try { db.exec('ALTER TABLE txs ADD COLUMN from_arkham TEXT'); } catch (e) {}
 try { db.exec('ALTER TABLE txs ADD COLUMN to_arkham TEXT'); } catch (e) {}
 try { db.exec('ALTER TABLE txs ADD COLUMN signals TEXT'); } catch (e) {}
 
+// 수령 지갑 추적 테이블 (30일 유지) — DEX 스왑 감지용
+db.exec(`
+  CREATE TABLE IF NOT EXISTS receivers_watch (
+    chain TEXT NOT NULL,
+    ca TEXT NOT NULL,
+    addr TEXT NOT NULL,
+    sym TEXT,
+    received_at INTEGER NOT NULL,
+    received_usd REAL NOT NULL DEFAULT 0,
+    PRIMARY KEY (chain, ca, addr)
+  )
+`);
+db.exec('CREATE INDEX IF NOT EXISTS idx_receivers_at ON receivers_watch(received_at)');
+const stmtReceiverUpsert = db.prepare(`
+  INSERT INTO receivers_watch (chain, ca, addr, sym, received_at, received_usd)
+  VALUES (@chain, @ca, @addr, @sym, @at, @usd)
+  ON CONFLICT(chain, ca, addr) DO UPDATE SET
+    received_at = @at,
+    received_usd = received_usd + @usd
+`);
+const stmtReceiverPurge = db.prepare('DELETE FROM receivers_watch WHERE received_at < ?');
+const stmtReceiverLoad = db.prepare('SELECT chain, ca, addr, received_at, received_usd FROM receivers_watch WHERE received_at >= ?');
+
 // 사용자 라벨 테이블 (다중 사용자 공유)
 db.exec(`
   CREATE TABLE IF NOT EXISTS wallet_labels (
@@ -148,8 +171,27 @@ setInterval(() => {
     const cutoff = Date.now() - 30 * 86400 * 1000;
     const r = stmtPurge.run(cutoff);
     if (r.changes > 0) console.log(`[DB] purged ${r.changes} rows older than 30d`);
+    // receivers_watch도 동일 기간 정리
+    const r2 = stmtReceiverPurge.run(cutoff);
+    if (r2.changes > 0) {
+      console.log(`[DB] purged ${r2.changes} receiver entries`);
+      // 메모리 캐시에서도 제거
+      for (const [k, v] of receiversCache) {
+        if (v.at < cutoff) receiversCache.delete(k);
+      }
+    }
   } catch (e) { console.warn('purge err:', e.message); }
 }, 3600 * 1000);
+
+// 수령 지갑 추적 메모리 캐시 — key: chain:ca:addr → {at, usd, sym}
+const receiversCache = new Map();
+try {
+  const rows = stmtReceiverLoad.all(Date.now() - 30 * 86400 * 1000);
+  rows.forEach(r => {
+    receiversCache.set(`${r.chain}:${r.ca}:${r.addr}`, { at: r.received_at, usd: r.received_usd });
+  });
+  console.log(`[receivers_watch] loaded ${rows.length} watched wallets`);
+} catch (e) { console.warn('receivers load err:', e.message); }
 
 // ── EXCLUDE list (메이저/스테이블) ──
 const EXCLUDE = new Set([
@@ -558,8 +600,34 @@ function formatAge(age) {
 // 반환: [{code, emoji, label, desc, severity}]
 function detectSignals(ctx) {
   const out = [];
-  const { chain, sym, amt, usd, supplyPct, from, to, fromEx, toEx, fromAge, toAge, fromArkham, toArkham, txClass } = ctx;
+  const { chain, sym, amt, usd, supplyPct, from, to, fromEx, toEx, fromAge, toAge, fromArkham, toArkham, txClass, isSwapBySender, watchedEntry, swappedToLP } = ctx;
   const now = Date.now();
+
+  // 🔀 DEX 스왑 감지 — 수령 지갑이 직접 DEX 풀로 송금
+  if (isSwapBySender && watchedEntry) {
+    const elapsed = now - watchedEntry.at;
+    const daysAgo = Math.floor(elapsed / 86400000);
+    const hoursAgo = Math.floor(elapsed / 3600000);
+    const ago = daysAgo > 0 ? `${daysAgo}일` : (hoursAgo > 0 ? `${hoursAgo}시간` : '방금');
+    const prevUsd = `$${(watchedEntry.usd/1e6).toFixed(2)}M`;
+    if (swappedToLP) {
+      out.push({
+        code: 'dex_swap_live',
+        emoji: '🔀',
+        label: 'DEX 스왑 실시간',
+        desc: `${ago} 전 ${prevUsd} 수령 → 지금 DEX 풀로 송금`,
+        severity: 'critical',
+      });
+    } else {
+      out.push({
+        code: 'swap_after',
+        emoji: '🔀',
+        label: '수령 후 처분',
+        desc: `${ago} 전 ${prevUsd} 수령 → 재송금 (${toEx ? '거래소 ' + toEx : '지갑'})`,
+        severity: toEx ? 'critical' : 'high',
+      });
+    }
+  }
 
   // A. 지갑 행동 이상 (단일 TX)
   if (fromAge && fromAge.days >= 730) {
@@ -648,28 +716,6 @@ function detectSignals(ctx) {
       out.push({ code: 'circular', emoji: '🔄', label: '순환 이체', desc: `1h 내 역방향 이체 감지`, severity: 'critical' });
     }
 
-    // 🔀 수령 후 처분 — 이 지갑이 최근에 같은 토큰을 받았고 지금 송금 중
-    // 조건: 송신자가 거래소가 아니고(보통 지갑), 24h 내 같은 토큰 수령 이력 있음
-    if (!fromEx && txClass && txClass.type !== 'cex_in') {
-      const prior = db.prepare(`
-        SELECT MIN(ts) AS first_recv, MAX(ts) AS last_recv, COUNT(*) AS cnt, SUM(usd) AS total
-        FROM txs
-        WHERE addr_to = ? AND sym = ? AND chain = ?
-          AND ts >= ? AND ts < ?
-      `).get(from.toLowerCase(), sym, chain, now - 24*3600*1000, now - 10*1000); // 10초 버퍼(자기 자신 제외)
-      if (prior && prior.cnt > 0) {
-        const hoursAgo = Math.max(1, Math.floor((now - prior.last_recv) / 3600000));
-        const dest = toEx ? `거래소(${toEx})` : 'DEX/지갑';
-        const severity = toEx ? 'critical' : 'high'; // 거래소 입금이면 더 위험
-        out.push({
-          code: 'swap_after',
-          emoji: '🔀',
-          label: '수령 후 처분',
-          desc: `${hoursAgo}h 전 ${sym} 수령 (${prior.cnt}회, $${(prior.total/1e6).toFixed(2)}M) → ${dest}`,
-          severity,
-        });
-      }
-    }
   } catch (e) { /* DB query fail silently */ }
 
   return out;
@@ -1269,12 +1315,22 @@ async function handleLog(chain, log_, source) {
     if (to === '0x0000000000000000000000000000000000000000') return;
     if (to === '0x000000000000000000000000000000000000dead') return;
 
-    // DEX/Bridge/Aggregator 제외 (양방향)
-    if (DEX_BLACKLIST.has(from) || DEX_BLACKLIST.has(to)) return;
-    // 동적 LP pair 제외
-    if (state.lpAddresses.has(from) || state.lpAddresses.has(to)) return;
-
+    // CA 먼저 확보 (watched 지갑 체크를 위해)
     const ca = (log_.address || '').toLowerCase();
+
+    // watched wallet 체크: 최근 30일 내 이 토큰을 받았던 지갑이 송금 중이면 "DEX 스왑 의심"
+    const watchKey = `${chain}:${ca}:${from.toLowerCase()}`;
+    const watchedEntry = receiversCache.get(watchKey);
+    const isSwapBySender = !!watchedEntry;
+
+    // DEX/Bridge/Aggregator 제외 (항상, Aggregator 스팸 방지)
+    if (DEX_BLACKLIST.has(from) || DEX_BLACKLIST.has(to)) return;
+
+    // 동적 LP pair 제외 — watched wallet이 송신이면 예외 (DEX 스왑 추적용)
+    if (!isSwapBySender) {
+      if (state.lpAddresses.has(from) || state.lpAddresses.has(to)) return;
+    }
+
     const hash = log_.transactionHash;
     const dedup = `${chain}-${hash}-${log_.logIndex}`;
     if (state.seenHashes.has(dedup)) return;
@@ -1312,11 +1368,18 @@ async function handleLog(chain, log_, source) {
     }
 
     // ── 동적 LP pair 감지 (100K+ 통과한 후 검사 — 비용 적음) ──
-    // from/to가 LP pair이면 drop + 다음부터는 빠른 정적 거름
-    const fromIsLP = await isLPPair(chain, from);
-    if (fromIsLP) return;
-    const toIsLP = await isLPPair(chain, to);
-    if (toIsLP) return;
+    // watched wallet(수령 후 스왑 추적) 중이면 LP pair 체크 건너뜀
+    let swappedToLP = false;
+    if (!isSwapBySender) {
+      const fromIsLP = await isLPPair(chain, from);
+      if (fromIsLP) return;
+      const toIsLP = await isLPPair(chain, to);
+      if (toIsLP) return;
+    } else {
+      // watched wallet의 경우 to가 LP면 DEX 스왑으로 기록 (그냥 정보로만 쓰고 drop 안함)
+      const toIsLP = await isLPPair(chain, to);
+      if (toIsLP) swappedToLP = true;
+    }
 
     // 발행량 %
     const supplyPct = meta.totalSupply > 0 ? (amt / meta.totalSupply * 100) : 0;
@@ -1347,6 +1410,7 @@ async function handleLog(chain, log_, source) {
       chain, sym: meta.symbol, ca, amt, usd, supplyPct,
       from, to, fromEx, toEx,
       fromAge, toAge, fromArkham, toArkham, txClass,
+      isSwapBySender, watchedEntry, swappedToLP,
     });
 
     state.stats.detected++;
@@ -1381,6 +1445,24 @@ async function handleLog(chain, log_, source) {
         signals: r.signals ? JSON.stringify(r.signals) : null,
       });
     } catch (e) { console.warn('db insert err:', e.message); }
+
+    // 수령 지갑 추적 등록 (receivers_watch, 30일)
+    // 조건: 수신자가 거래소가 아니고 일반 지갑인 경우만
+    if (!toEx && r.tx_type !== 'cex_int') {
+      const watchKey2 = `${chain}:${ca}:${to.toLowerCase()}`;
+      try {
+        stmtReceiverUpsert.run({
+          chain, ca, addr: to.toLowerCase(), sym: meta.symbol,
+          at: r.ts, usd: r.usd,
+        });
+        // 메모리 캐시 업데이트
+        const existing = receiversCache.get(watchKey2);
+        receiversCache.set(watchKey2, {
+          at: r.ts,
+          usd: (existing?.usd || 0) + r.usd,
+        });
+      } catch (e) {}
+    }
 
     // 메모리 큐 (최근 200건)
     state.recentTxs.unshift(r);
@@ -1883,6 +1965,7 @@ const httpServer = http.createServer(async (req, res) => {
         meta_db: db.prepare('SELECT COUNT(*) AS c FROM token_meta').get().c,
         lp_db: db.prepare('SELECT COUNT(*) AS c FROM addr_type').get().c,
         seen: state.seenHashes.size,
+        watched_receivers: receiversCache.size,
       },
       binance_wl: state.binanceWL?.size || 0,
       dex_blacklist: DEX_BLACKLIST.size,
