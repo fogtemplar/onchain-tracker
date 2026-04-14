@@ -1359,8 +1359,6 @@ async function handleLog(chain, log_, source) {
     const price = await getPrice(meta.symbol, ca, chain);
     if (!price) return;
     const usd = amt * price;
-    // watched wallet(수령 후 스왑 추적 중)이면 임계값 무시 — 스왑 여부만 중요
-    if (!isSwapBySender && usd < MIN_USD) return;
 
     // sanity: 비정상적으로 큰 USD (>$1B) → 가격 오류 의심, drop + 로깅
     if (usd > 1e9) {
@@ -1368,19 +1366,23 @@ async function handleLog(chain, log_, source) {
       return;
     }
 
-    // ── 동적 LP pair 감지 (100K+ 통과한 후 검사 — 비용 적음) ──
-    // watched wallet(수령 후 스왑 추적) 중이면 LP pair 체크 건너뜀
+    // ── 동적 LP pair 감지 ──
+    // watched wallet(수령 후 스왑 추적) 중이고 to가 LP이면 DEX 스왑으로 기록
     let swappedToLP = false;
-    if (!isSwapBySender) {
-      const fromIsLP = await isLPPair(chain, from);
-      if (fromIsLP) return;
-      const toIsLP = await isLPPair(chain, to);
-      if (toIsLP) return;
-    } else {
-      // watched wallet의 경우 to가 LP면 DEX 스왑으로 기록 (그냥 정보로만 쓰고 drop 안함)
+    if (isSwapBySender) {
       const toIsLP = await isLPPair(chain, to);
       if (toIsLP) swappedToLP = true;
     }
+    // watched가 아닌 일반 tx: 양방향 LP 제외
+    if (!isSwapBySender) {
+      const fromIsLP = await isLPPair(chain, from);
+      if (fromIsLP) return;
+      const toIsLP2 = await isLPPair(chain, to);
+      if (toIsLP2) return;
+    }
+
+    // 임계값 적용: DEX 풀 스왑(swappedToLP)만 임계값 면제, 나머지는 $100K+ 유지
+    if (!swappedToLP && usd < MIN_USD) return;
 
     // 발행량 %
     const supplyPct = meta.totalSupply > 0 ? (amt / meta.totalSupply * 100) : 0;
