@@ -3371,8 +3371,15 @@ function whaleRender(){
     var ago = tAgo(r.ts/1000);
     var pctStr = r.supplyPct > 0 ? r.supplyPct.toFixed(2)+'%' : '—';
     var pctColor = r.supplyPct >= 1 ? '#800000' : r.supplyPct >= 0.1 ? '#808000' : '#000080';
-    var fromLabel = r.fromENS ? '🏷 '+r.fromENS : (EX_MAP[r.from] ? '🏦 '+EX_MAP[r.from] : '👤 '+r.from.slice(0,6)+'…'+r.from.slice(-4));
-    var toLabel = r.toENS ? '🏷 '+r.toENS : (EX_MAP[r.to] ? '🏦 '+EX_MAP[r.to] : '👤 '+r.to.slice(0,6)+'…'+r.to.slice(-4));
+    // 우선순위: ENS > Arkham > 하드코딩 거래소 > 축약주소
+    var fromLabel = r.fromENS ? '🏷 '+r.fromENS
+      : (r.fromArkham ? '🔬 '+r.fromArkham
+      : (EX_MAP[r.from] ? '🏦 '+EX_MAP[r.from]
+      : '👤 '+r.from.slice(0,6)+'…'+r.from.slice(-4)));
+    var toLabel = r.toENS ? '🏷 '+r.toENS
+      : (r.toArkham ? '🔬 '+r.toArkham
+      : (EX_MAP[r.to] ? '🏦 '+EX_MAP[r.to]
+      : '👤 '+r.to.slice(0,6)+'…'+r.to.slice(-4)));
     var fromAgeStr = r.fromAge ? ' <span style="font-size:9px;color:#808080;font-weight:bold;">['+r.fromAge+']</span>' : '';
     var toAgeStr = r.toAge ? ' <span style="font-size:9px;color:#808080;font-weight:bold;">['+r.toAge+']</span>' : '';
     var fromPortfolio = r.chain==='sol' ? 'https://jup.ag/portfolio/'+r.from : 'https://debank.com/profile/'+r.from;

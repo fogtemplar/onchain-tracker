@@ -20,6 +20,7 @@ const PORT        = parseInt(process.env.PORT || '3000');
 const CMC_KEY     = process.env.CMC_KEY     || '7c23a703-55ff-4b19-babd-a4cf83aae98c';
 const CG_API_KEY  = process.env.CG_API_KEY  || 'b745429f379948b8b715f6beded5c2ea';
 const ETH_KEY     = process.env.ETHERSCAN_KEY || 'MFC6RKPAYYCWID4YEH9ZM7FJWTZPY9HM4Z';
+const ARKHAM_KEY  = process.env.ARKHAM_KEY || '';
 
 // ── Chain config ──
 // WebSocket + HTTP: PublicNode 무료 → Alchemy CU 0
@@ -77,6 +78,8 @@ try { db.exec('ALTER TABLE txs ADD COLUMN to_age TEXT'); } catch (e) {}
 try { db.exec('ALTER TABLE txs ADD COLUMN from_ens TEXT'); } catch (e) {}
 try { db.exec('ALTER TABLE txs ADD COLUMN to_ens TEXT'); } catch (e) {}
 try { db.exec('ALTER TABLE txs ADD COLUMN to_flags TEXT'); } catch (e) {}
+try { db.exec('ALTER TABLE txs ADD COLUMN from_arkham TEXT'); } catch (e) {}
+try { db.exec('ALTER TABLE txs ADD COLUMN to_arkham TEXT'); } catch (e) {}
 
 // 사용자 라벨 테이블 (다중 사용자 공유)
 db.exec(`
@@ -105,8 +108,8 @@ console.log(`[DB] SQLite at ${DB_PATH} — ${dbCount} txs, ${labelCount} labels`
 
 // Prepared statements
 const stmtInsert = db.prepare(`
-  INSERT OR IGNORE INTO txs (ts, chain, sym, ca, amt, price, usd, supply_pct, ex_from, ex_to, addr_from, addr_to, hash, tx_type, tx_tag, from_age, to_age, from_ens, to_ens, to_flags)
-  VALUES (@ts, @chain, @sym, @ca, @amt, @price, @usd, @supply_pct, @ex_from, @ex_to, @addr_from, @addr_to, @hash, @tx_type, @tx_tag, @from_age, @to_age, @from_ens, @to_ens, @to_flags)
+  INSERT OR IGNORE INTO txs (ts, chain, sym, ca, amt, price, usd, supply_pct, ex_from, ex_to, addr_from, addr_to, hash, tx_type, tx_tag, from_age, to_age, from_ens, to_ens, to_flags, from_arkham, to_arkham)
+  VALUES (@ts, @chain, @sym, @ca, @amt, @price, @usd, @supply_pct, @ex_from, @ex_to, @addr_from, @addr_to, @hash, @tx_type, @tx_tag, @from_age, @to_age, @from_ens, @to_ens, @to_flags, @from_arkham, @to_arkham)
 `);
 const stmtRecent = db.prepare(`SELECT * FROM txs ORDER BY ts DESC LIMIT ?`);
 const stmtFilter = db.prepare(`
@@ -628,6 +631,81 @@ async function ethRpc(method, params) {
   return d.result;
 }
 
+// ── Arkham Intelligence 라벨 (서버 사이드 + SQLite 공유 캐시) ──
+db.exec(`
+  CREATE TABLE IF NOT EXISTS arkham_cache (
+    addr TEXT PRIMARY KEY,
+    name TEXT,
+    type TEXT,
+    service TEXT,
+    note TEXT,
+    chain TEXT,
+    updated_at INTEGER NOT NULL
+  )
+`);
+const stmtArkhamGet = db.prepare('SELECT name, type, service, note, chain, updated_at FROM arkham_cache WHERE addr = ?');
+const stmtArkhamSet = db.prepare(`
+  INSERT OR REPLACE INTO arkham_cache (addr, name, type, service, note, chain, updated_at)
+  VALUES (?, ?, ?, ?, ?, ?, ?)
+`);
+
+async function resolveArkham(addr) {
+  if (!ARKHAM_KEY) return null;
+  const lo = (addr || '').toLowerCase();
+  if (!lo || lo.length < 20) return null;
+
+  // 1. SQLite 캐시 (30일 TTL — null 결과도 캐시)
+  try {
+    const row = stmtArkhamGet.get(lo);
+    if (row && Date.now() - row.updated_at < 30 * 86400000) {
+      return row.name ? { name: row.name, type: row.type, service: row.service, note: row.note, chain: row.chain } : null;
+    }
+  } catch (e) {}
+
+  // 2. Arkham API 호출
+  try {
+    const res = await fetch(`https://api.arkm.com/intelligence/address/${lo}`, {
+      headers: { 'API-Key': ARKHAM_KEY },
+      signal: AbortSignal.timeout(8000),
+    });
+    if (!res.ok) {
+      // rate limit / error → null 결과 저장 (짧은 TTL 효과는 없지만 중복 호출 방지)
+      try { stmtArkhamSet.run(lo, null, null, null, null, null, Date.now()); } catch (e) {}
+      return null;
+    }
+    const d = await res.json();
+    // 응답 구조: {ethereum: {arkhamEntity: {...}}, bsc: {...}, ...}
+    let entity = null;
+    for (const chain in d) {
+      const obj = d[chain];
+      if (obj && obj.arkhamEntity && obj.arkhamEntity.name) {
+        entity = {
+          name: obj.arkhamEntity.name,
+          type: obj.arkhamEntity.type || '',
+          service: obj.arkhamEntity.service || '',
+          note: obj.arkhamEntity.note || '',
+          chain,
+        };
+        break;
+      }
+    }
+    try {
+      stmtArkhamSet.run(
+        lo,
+        entity?.name || null,
+        entity?.type || null,
+        entity?.service || null,
+        entity?.note || null,
+        entity?.chain || null,
+        Date.now()
+      );
+    } catch (e) {}
+    return entity;
+  } catch (e) {
+    return null;
+  }
+}
+
 // ── LP 감지 DB (SQLite 영구 캐시) ──
 db.exec(`
   CREATE TABLE IF NOT EXISTS addr_type (
@@ -1116,11 +1194,13 @@ async function handleLog(chain, log_, source) {
     const txClass = classifyTxType(from, to, fromEx, toEx);
 
     // 지갑 나이 + ENS 조회 (병렬)
-    const [fromAge, toAge, fromENS, toENS] = await Promise.all([
+    const [fromAge, toAge, fromENS, toENS, fromArkham, toArkham] = await Promise.all([
       getWalletAge(chain, from).catch(() => null),
       getWalletAge(chain, to).catch(() => null),
       resolveENS(from).catch(() => null),
       resolveENS(to).catch(() => null),
+      resolveArkham(from).catch(() => null),
+      resolveArkham(to).catch(() => null),
     ]);
 
     // ── 수신자 플래그 ──
@@ -1137,6 +1217,8 @@ async function handleLog(chain, log_, source) {
       from, to, fromEx, toEx, hash, supplyPct,
       fromAge: formatAge(fromAge), toAge: formatAge(toAge),
       fromENS: fromENS || null, toENS: toENS || null,
+      fromArkham: fromArkham?.name || null,
+      toArkham: toArkham?.name || null,
       toFlags: toFlags.length ? toFlags : null,
       tx_type: txClass.type,
       tx_label: txClass.label,
@@ -1156,6 +1238,7 @@ async function handleLog(chain, log_, source) {
         from_age: r.fromAge || null, to_age: r.toAge || null,
         from_ens: r.fromENS || null, to_ens: r.toENS || null,
         to_flags: r.toFlags ? r.toFlags.join(',') : null,
+        from_arkham: r.fromArkham || null, to_arkham: r.toArkham || null,
       });
     } catch (e) { console.warn('db insert err:', e.message); }
 
@@ -1691,7 +1774,7 @@ const httpServer = http.createServer(async (req, res) => {
         from: row.addr_from, to: row.addr_to,
         fromEx: row.ex_from, toEx: row.ex_to, hash: row.hash,
         tx_type: row.tx_type, tx_tag: row.tx_tag,
-        fromAge: row.from_age, toAge: row.to_age, fromENS: row.from_ens, toENS: row.to_ens, toFlags: row.to_flags ? row.to_flags.split(',') : null,
+        fromAge: row.from_age, toAge: row.to_age, fromENS: row.from_ens, toENS: row.to_ens, toFlags: row.to_flags ? row.to_flags.split(',') : null, fromArkham: row.from_arkham, toArkham: row.to_arkham,
       }));
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ ok: true, count: data.length, data }));
@@ -2178,7 +2261,7 @@ wss.on('connection', (clientWs, req) => {
       from: row.addr_from, to: row.addr_to,
       fromEx: row.ex_from, toEx: row.ex_to, hash: row.hash,
       tx_type: row.tx_type, tx_tag: row.tx_tag,
-      fromAge: row.from_age, toAge: row.to_age, fromENS: row.from_ens, toENS: row.to_ens, toFlags: row.to_flags ? row.to_flags.split(',') : null,
+      fromAge: row.from_age, toAge: row.to_age, fromENS: row.from_ens, toENS: row.to_ens, toFlags: row.to_flags ? row.to_flags.split(',') : null, fromArkham: row.from_arkham, toArkham: row.to_arkham,
     }));
     const total = db.prepare('SELECT COUNT(*) AS c FROM txs').get().c;
     let labels = [];
@@ -2263,7 +2346,8 @@ httpServer.listen(PORT, () => log(`HTTP+WS server on :${PORT}`));
     `임계값: $${fN(MIN_USD)}+\n` +
     `EVM 구독: ${totalCA - (state.caList.sol||[]).length}개 CA\n` +
     `SOL: ${(state.caList.sol||[]).length}개 mint\n` +
-    `DEX/Bridge ${DEX_BLACKLIST.size}개 블랙리스트`
+    `DEX/Bridge ${DEX_BLACKLIST.size}개 블랙리스트\n` +
+    `Arkham: ${ARKHAM_KEY ? '✅ 활성' : '❌ 비활성 (ARKHAM_KEY 미설정)'}`
   );
 })();
 
