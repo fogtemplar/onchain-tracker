@@ -1359,7 +1359,8 @@ async function handleLog(chain, log_, source) {
     const price = await getPrice(meta.symbol, ca, chain);
     if (!price) return;
     const usd = amt * price;
-    if (usd < MIN_USD) return;
+    // watched wallet(수령 후 스왑 추적 중)이면 임계값 무시 — 스왑 여부만 중요
+    if (!isSwapBySender && usd < MIN_USD) return;
 
     // sanity: 비정상적으로 큰 USD (>$1B) → 가격 오류 의심, drop + 로깅
     if (usd > 1e9) {
@@ -1386,6 +1387,12 @@ async function handleLog(chain, log_, source) {
 
     // 트랜잭션 유형 분류
     const txClass = classifyTxType(from, to, fromEx, toEx);
+    // DEX 풀로 직접 스왑 감지된 경우 분류 강제
+    if (swappedToLP) {
+      txClass.type = 'dex_swap';
+      txClass.label = '🔁 DEX스왑';
+      txClass.tag = 'Pool';
+    }
 
     // 지갑 나이 + ENS 조회 (병렬)
     const [fromAge, toAge, fromENS, toENS, fromArkham, toArkham] = await Promise.all([
