@@ -1198,15 +1198,24 @@ async function sendTelegram(text) {
 function formatMessage(r) {
   const tier = r.usd >= 1e6 ? '🔴 1M+' : r.usd >= 5e5 ? '🟠 500K+' : '🟡 100K+';
   const supplyStr = r.supplyPct > 0 ? ` (총 공급량의 ${r.supplyPct.toFixed(2)}%)` : '';
+  // 신호 포맷: 이모지 + (한글설명)
+  let signalStr = '';
+  if (r.signals && r.signals.length) {
+    const sevOrder = { critical: 4, high: 3, med: 2, low: 1 };
+    const sorted = r.signals.slice().sort((a, b) => (sevOrder[b.severity] || 0) - (sevOrder[a.severity] || 0));
+    signalStr = `\n🚨 <b>이상신호</b>\n` +
+      sorted.map(s => `  ${s.emoji} ${s.label}${s.desc ? ' — ' + s.desc : ''}`).join('\n') + '\n';
+  }
   return `${tier} <b>${r.sym}</b> 전송 감지\n\n` +
     `💰 가치: <b>$${fN(r.usd)}</b>\n` +
     `📊 가격: $${r.price < 1 ? r.price.toFixed(6) : r.price.toFixed(4)}\n` +
     `📦 수량: ${fN(r.amt)} ${r.sym}${supplyStr}\n` +
     `🔗 네트워크: ${CHAINS[r.chain].name}\n` +
     `🕐 ${new Date(r.ts).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' })}\n\n` +
-    `🏦 From: ${r.fromENS ? '<b>' + r.fromENS + '</b> ' : ''}<code>${r.from}</code>${r.fromEx ? ' (' + r.fromEx + ')' : ''} [${r.fromAge}]\n` +
-    `👤 To: ${r.toENS ? '<b>' + r.toENS + '</b> ' : ''}<code>${r.to}</code>${r.toEx ? ' (' + r.toEx + ')' : ''} [${r.toAge}]\n` +
+    `🏦 From: ${r.fromArkham ? '<b>' + r.fromArkham + '</b> ' : (r.fromENS ? '<b>' + r.fromENS + '</b> ' : '')}<code>${r.from}</code>${r.fromEx ? ' (' + r.fromEx + ')' : ''} [${r.fromAge}]\n` +
+    `👤 To: ${r.toArkham ? '<b>' + r.toArkham + '</b> ' : (r.toENS ? '<b>' + r.toENS + '</b> ' : '')}<code>${r.to}</code>${r.toEx ? ' (' + r.toEx + ')' : ''} [${r.toAge}]\n` +
     (r.toFlags?.length ? `⚠️ <b>${r.toFlags.join(' ')}</b>\n` : '') +
+    signalStr +
     `\n<a href="${CHAINS[r.chain].exp}/tx/${r.hash}">TX 보기</a> · ` +
     `<a href="${CHAINS[r.chain].exp}/token/${r.ca}">토큰</a>`;
 }
@@ -1954,6 +1963,29 @@ const httpServer = http.createServer(async (req, res) => {
         r.spark = buckets;
       });
 
+      // 토큰별 신호 집계
+      const sigStmt = db.prepare(`
+        SELECT signals FROM txs WHERE sym=? AND chain=? AND ts>=? AND signals IS NOT NULL
+      `);
+      const sevOrd = { critical: 4, high: 3, med: 2, low: 1 };
+      rows.forEach(r => {
+        const sigMap = {};
+        const sigRows = sigStmt.all(r.sym, r.chain, fromTs);
+        sigRows.forEach(sr => {
+          try {
+            const sigs = JSON.parse(sr.signals);
+            if (!Array.isArray(sigs)) return;
+            sigs.forEach(s => {
+              if (!sigMap[s.code]) sigMap[s.code] = { emoji: s.emoji, label: s.label, count: 0, severity: s.severity };
+              sigMap[s.code].count++;
+            });
+          } catch (e) {}
+        });
+        r.signals = Object.values(sigMap)
+          .sort((a, b) => (sevOrd[b.severity] || 0) - (sevOrd[a.severity] || 0) || b.count - a.count)
+          .slice(0, 5);
+      });
+
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ ok: true, days, count: rows.length, data: rows }));
     } catch (e) {
@@ -2026,6 +2058,26 @@ const httpServer = http.createServer(async (req, res) => {
         });
       } catch (e) {}
 
+      // 토큰별 이상신호 집계 (최근 24시간)
+      const signalMap = {};
+      try {
+        db.prepare(`
+          SELECT sym, chain, signals FROM txs
+          WHERE ts >= ? AND signals IS NOT NULL
+        `).all(now - 86400000).forEach(r => {
+          try {
+            const sigs = JSON.parse(r.signals);
+            if (!Array.isArray(sigs) || !sigs.length) return;
+            const key = r.sym + ':' + r.chain;
+            if (!signalMap[key]) signalMap[key] = {};
+            sigs.forEach(s => {
+              if (!signalMap[key][s.code]) signalMap[key][s.code] = { emoji: s.emoji, label: s.label, count: 0, severity: s.severity };
+              signalMap[key][s.code].count++;
+            });
+          } catch (e) {}
+        });
+      } catch (e) {}
+
       // 복합 점수 계산
       const scored = rows.map(r => {
         const key = r.sym + ':' + r.chain;
@@ -2062,6 +2114,11 @@ const httpServer = http.createServer(async (req, res) => {
         score = Math.min(100, Math.round(score));
 
         const flags = flagMap[key] || { newWallet: 0, singleToken: 0 };
+        // 토큰별 신호: 심각도 순 정렬
+        const sevOrder = { critical: 4, high: 3, med: 2, low: 1 };
+        const topSignals = Object.values(signalMap[key] || {})
+          .sort((a, b) => (sevOrder[b.severity] || 0) - (sevOrder[a.severity] || 0) || b.count - a.count)
+          .slice(0, 5);
         return {
           sym: r.sym, chain: r.chain, ca: r.ca, score,
           cnt_7d: r.cnt_7d, cnt_24h: h24.cnt_24h, cnt_1h: h1.cnt_1h,
@@ -2070,6 +2127,7 @@ const httpServer = http.createServer(async (req, res) => {
           unique_receivers: r.unique_receivers, unique_senders: r.unique_senders,
           is_new: isNew, last_ts: r.last_ts,
           new_wallet_cnt: flags.newWallet, single_token_cnt: flags.singleToken,
+          signals: topSignals,
         };
       });
 

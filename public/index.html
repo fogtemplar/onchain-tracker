@@ -1668,12 +1668,13 @@ window.addEventListener('DOMContentLoaded', function(){
             <th style="text-align:right;">총 USD</th>
             <th style="text-align:right;">평균</th>
             <th style="text-align:right;">최대</th>
+            <th>신호</th>
             <th>분포</th>
             <th>최근</th>
           </tr>
         </thead>
         <tbody id="freqBody">
-          <tr><td colspan="9" style="padding:30px;text-align:center;color:#404040;">로딩 중...</td></tr>
+          <tr><td colspan="10" style="padding:30px;text-align:center;color:#404040;">로딩 중...</td></tr>
         </tbody>
       </table>
     </div>
@@ -1960,7 +1961,7 @@ async function analyticsLoadFreq(days){
     if(b) b.className = 'freq-tab'+(parseInt(d)===days?' on':'');
   });
   var base = analyticsHttpBase();
-  if(!base){ document.getElementById('freqBody').innerHTML = '<tr><td colspan="9" style="text-align:center;color:#800000;">Railway URL 미설정</td></tr>'; return; }
+  if(!base){ document.getElementById('freqBody').innerHTML = '<tr><td colspan="10" style="text-align:center;color:#800000;">Railway URL 미설정</td></tr>'; return; }
   document.getElementById('analyticsStatus').textContent = '📥 빈도 데이터 로드 중 ('+days+'일)...';
   try {
     var r = await fetch(base+'/analytics/freq?days='+days, {signal: AbortSignal.timeout(20000)});
@@ -1971,7 +1972,7 @@ async function analyticsLoadFreq(days){
       document.getElementById('analyticsStatus').textContent = '✓ '+d.count+'개 토큰 ('+days+'일)';
     }
   } catch(e){
-    document.getElementById('freqBody').innerHTML = '<tr><td colspan="9" style="text-align:center;color:#800000;">로드 실패: '+e.message+'</td></tr>';
+    document.getElementById('freqBody').innerHTML = '<tr><td colspan="10" style="text-align:center;color:#800000;">로드 실패: '+e.message+'</td></tr>';
   }
 }
 
@@ -1982,7 +1983,7 @@ function analyticsRenderFreq(){
     return (b[sort]||0) - (a[sort]||0);
   });
   if(!arr.length){
-    document.getElementById('freqBody').innerHTML = '<tr><td colspan="9" style="padding:30px;text-align:center;color:#404040;">데이터 없음</td></tr>';
+    document.getElementById('freqBody').innerHTML = '<tr><td colspan="10" style="padding:30px;text-align:center;color:#404040;">데이터 없음</td></tr>';
     return;
   }
   var maxCnt = Math.max.apply(null, arr.map(function(r){return Math.max.apply(null,r.spark||[1]);}));
@@ -1994,6 +1995,16 @@ function analyticsRenderFreq(){
       var c = v >= maxCnt*0.7 ? '#800000' : v >= maxCnt*0.3 ? '#808000' : '#000080';
       return '<span class="spark-bar" style="height:'+h+'px;background:'+c+';" title="'+v+'건"></span>';
     }).join('');
+    // 신호 배지 렌더
+    var sigHtml = '—';
+    if(r.signals && r.signals.length){
+      var sevC = {critical:'#800000', high:'#c05000', med:'#808000', low:'#000080'};
+      sigHtml = r.signals.slice(0,4).map(function(s){
+        var col = sevC[s.severity] || '#404040';
+        var tip = (s.label+' × '+s.count+'건').replace(/"/g,'&quot;');
+        return '<span title="'+tip+'" style="background:'+col+';color:#fff;padding:1px 3px;font-size:9px;font-weight:bold;cursor:help;margin-right:1px;">'+s.emoji+'</span>';
+      }).join('');
+    }
     return '<tr style="cursor:pointer;" data-ca="'+(r.ca||'')+'" data-chain="'+r.chain+'" data-sym="'+r.sym+'" onclick="analyticsTokenDetail(this.dataset.sym,this.dataset.chain,this.dataset.ca)">'+
       '<td style="text-align:center;color:#404040;">'+(i+1)+'</td>'+
       '<td style="font-weight:bold;">'+r.sym+'</td>'+
@@ -2002,6 +2013,7 @@ function analyticsRenderFreq(){
       '<td style="text-align:right;font-weight:bold;">$'+fN(r.total_usd)+'</td>'+
       '<td style="text-align:right;color:#404040;">$'+fN(r.avg_usd)+'</td>'+
       '<td style="text-align:right;color:#800000;">$'+fN(r.max_usd)+'</td>'+
+      '<td style="white-space:nowrap;">'+sigHtml+'</td>'+
       '<td style="white-space:nowrap;">'+spark+'</td>'+
       '<td style="color:#404040;font-size:10px;white-space:nowrap;">'+ago+'</td>'+
     '</tr>';
@@ -2069,6 +2081,15 @@ function analyticsRenderWatchlist(){
         if(w.mcLabel === 'MICRO') labels.push('<span title="시가총액 $10M 미만" style="background:#808000;color:#fff;padding:1px 5px;font-size:8px;font-weight:bold;cursor:help;">초소형</span>');
         else if(w.mcLabel === 'SMALL') labels.push('<span title="시가총액 $10M~$50M" style="background:#004080;color:#fff;padding:1px 5px;font-size:8px;font-weight:bold;cursor:help;">소형</span>');
         if(w.is_new) labels.push('<span title="최근 3일 이내 처음 감지된 토큰" style="background:#008000;color:#fff;padding:1px 5px;font-size:8px;font-weight:bold;cursor:help;">신규토큰</span>');
+        // 이상신호 배지 (누적)
+        if(w.signals && w.signals.length){
+          var sevColor = {critical:'#800000', high:'#c05000', med:'#808000', low:'#000080'};
+          w.signals.forEach(function(s){
+            var col = sevColor[s.severity] || '#404040';
+            var tip = (s.label+' × '+s.count+'건').replace(/"/g,'&quot;');
+            labels.push('<span title="'+tip+'" style="background:'+col+';color:#fff;padding:1px 4px;font-size:9px;font-weight:bold;cursor:help;">'+s.emoji+' '+s.count+'</span>');
+          });
+        }
         return labels.length ? '<div style="display:flex;flex-wrap:wrap;gap:3px;margin-top:5px;pointer-events:auto;">'+labels.join('')+'</div>' : '';
       })()+
     '</div>';
