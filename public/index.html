@@ -1736,15 +1736,136 @@ window.addEventListener('DOMContentLoaded', function(){
         </select>
         <span id="whaleFilterCount" style="font-size:10px;color:#404040;"></span>
         <label style="font-size:10px;color:#000;margin-left:8px;border-left:1px solid #808080;padding-left:8px;">
-          <input type="checkbox" id="ttsEnabled" onchange="ttsToggle()" style="vertical-align:middle;"> 🔊 음성알림
+          <input type="checkbox" id="ttsEnabled" onchange="ttsToggle()" style="vertical-align:middle;"> 🔊 알림
         </label>
-        <select id="ttsMinUsd" onchange="ttsSaveSettings()" style="font-size:10px;">
-          <option value="100000" selected>$100K+</option>
-          <option value="500000">$500K+</option>
-          <option value="1000000">$1M+</option>
-          <option value="5000000">$5M+</option>
-        </select>
         <button onclick="ttsTest()" style="font-size:10px;cursor:pointer;">🎤 테스트</button>
+        <button onclick="ttsOpenSettings()" style="font-size:10px;cursor:pointer;">⚙️ 설정</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══ TTS 설정 모달 ═══ -->
+  <div id="ttsSettingsModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:10000;align-items:center;justify-content:center;">
+    <div style="background:#c0c0c0;border:2px solid #fff;box-shadow:4px 4px 0 #000;padding:0;width:520px;max-height:90vh;overflow-y:auto;font-family:'MS Sans Serif',sans-serif;">
+      <div style="background:#000080;color:#fff;padding:4px 8px;font-size:12px;font-weight:bold;display:flex;justify-content:space-between;">
+        <span>🔊 알림 설정</span>
+        <span onclick="ttsCloseSettings()" style="cursor:pointer;padding:0 6px;">✕</span>
+      </div>
+      <div style="padding:12px;font-size:11px;color:#000;">
+
+        <div style="background:#fff;border:1px inset #808080;padding:8px;margin-bottom:8px;">
+          <div style="font-weight:bold;margin-bottom:6px;color:#000080;">━━ 음성 (TTS) ━━</div>
+          <label style="display:block;margin-bottom:4px;">
+            <input type="checkbox" id="ttsVoiceEnabled" onchange="ttsSaveSettings()"> 음성 사용
+          </label>
+          <div style="margin-bottom:4px;">
+            <label>임계값:
+              <select id="ttsVoiceMinUsd" onchange="ttsSaveSettings()" style="font-size:11px;">
+                <option value="0">전체</option>
+                <option value="100000">$100K+</option>
+                <option value="500000">$500K+</option>
+                <option value="1000000">$1M+</option>
+                <option value="5000000">$5M+</option>
+              </select>
+            </label>
+          </div>
+          <div style="margin-bottom:4px;">
+            <label>속도:
+              <input type="range" id="ttsRate" min="0.5" max="2" step="0.1" value="1.1" oninput="ttsSaveSettings();document.getElementById('ttsRateLabel').textContent=this.value;" style="vertical-align:middle;width:120px;">
+              <span id="ttsRateLabel">1.1</span>x
+            </label>
+          </div>
+          <div style="margin-bottom:4px;">
+            <label>음높이:
+              <input type="range" id="ttsPitch" min="0.5" max="2" step="0.1" value="1" oninput="ttsSaveSettings();document.getElementById('ttsPitchLabel').textContent=this.value;" style="vertical-align:middle;width:120px;">
+              <span id="ttsPitchLabel">1</span>
+            </label>
+          </div>
+          <div style="margin-bottom:4px;">
+            <label>음량:
+              <input type="range" id="ttsVolume" min="0" max="1" step="0.05" value="1" oninput="ttsSaveSettings();document.getElementById('ttsVolumeLabel').textContent=Math.round(this.value*100);" style="vertical-align:middle;width:120px;">
+              <span id="ttsVolumeLabel">100</span>%
+            </label>
+          </div>
+          <div>
+            <label>음성:
+              <select id="ttsVoice" onchange="ttsSaveSettings()" style="font-size:11px;max-width:280px;">
+                <option value="">기본 (시스템)</option>
+              </select>
+            </label>
+          </div>
+        </div>
+
+        <div style="background:#fff;border:1px inset #808080;padding:8px;margin-bottom:8px;">
+          <div style="font-weight:bold;margin-bottom:6px;color:#800000;">━━ 사이렌 ━━</div>
+          <label style="display:block;margin-bottom:4px;">
+            <input type="checkbox" id="ttsSirenEnabled" onchange="ttsSaveSettings()"> 사이렌 사용
+          </label>
+          <div style="margin-bottom:4px;">
+            <label>임계값:
+              <select id="ttsSirenMinUsd" onchange="ttsSaveSettings()" style="font-size:11px;">
+                <option value="0">전체</option>
+                <option value="100000">$100K+</option>
+                <option value="500000">$500K+</option>
+                <option value="1000000">$1M+</option>
+                <option value="5000000">$5M+</option>
+              </select>
+            </label>
+          </div>
+          <div style="margin-bottom:4px;">
+            <label>종류:
+              <select id="ttsSirenType" onchange="ttsSaveSettings()" style="font-size:11px;">
+                <option value="sweep">사이렌 (Sweep)</option>
+                <option value="beep">알림음 (Beep)</option>
+                <option value="klaxon">경적 (Klaxon)</option>
+                <option value="alarm">화재경보 (Alarm)</option>
+              </select>
+            </label>
+          </div>
+          <div style="margin-bottom:4px;">
+            <label>반복:
+              <select id="ttsSirenRepeat" onchange="ttsSaveSettings()" style="font-size:11px;">
+                <option value="1">1회</option>
+                <option value="2">2회</option>
+                <option value="3">3회</option>
+              </select>
+            </label>
+          </div>
+          <div>
+            <label>음량:
+              <input type="range" id="ttsSirenVolume" min="0" max="1" step="0.05" value="0.25" oninput="ttsSaveSettings();document.getElementById('ttsSirenVolumeLabel').textContent=Math.round(this.value*100);" style="vertical-align:middle;width:120px;">
+              <span id="ttsSirenVolumeLabel">25</span>%
+            </label>
+          </div>
+        </div>
+
+        <div style="background:#fff;border:1px inset #808080;padding:8px;margin-bottom:8px;">
+          <div style="font-weight:bold;margin-bottom:6px;color:#008000;">━━ 필터 ━━</div>
+          <div style="margin-bottom:6px;">
+            <div style="font-size:10px;color:#404040;margin-bottom:2px;">체인:</div>
+            <label style="margin-right:6px;"><input type="checkbox" class="ttsChainFilter" value="eth" checked onchange="ttsSaveSettings()"> ETH</label>
+            <label style="margin-right:6px;"><input type="checkbox" class="ttsChainFilter" value="bsc" checked onchange="ttsSaveSettings()"> BSC</label>
+            <label style="margin-right:6px;"><input type="checkbox" class="ttsChainFilter" value="arb" checked onchange="ttsSaveSettings()"> ARB</label>
+            <label style="margin-right:6px;"><input type="checkbox" class="ttsChainFilter" value="base" checked onchange="ttsSaveSettings()"> BASE</label>
+            <label style="margin-right:6px;"><input type="checkbox" class="ttsChainFilter" value="poly" checked onchange="ttsSaveSettings()"> POLY</label>
+            <label style="margin-right:6px;"><input type="checkbox" class="ttsChainFilter" value="sol" checked onchange="ttsSaveSettings()"> SOL</label>
+          </div>
+          <div>
+            <div style="font-size:10px;color:#404040;margin-bottom:2px;">유형:</div>
+            <label style="margin-right:6px;"><input type="checkbox" class="ttsTypeFilter" value="cex_out" checked onchange="ttsSaveSettings()"> 거래소출금</label>
+            <label style="margin-right:6px;"><input type="checkbox" class="ttsTypeFilter" value="cex_in" checked onchange="ttsSaveSettings()"> 거래소입금</label>
+            <label style="margin-right:6px;"><input type="checkbox" class="ttsTypeFilter" value="dex_swap" checked onchange="ttsSaveSettings()"> DEX</label>
+            <label style="margin-right:6px;"><input type="checkbox" class="ttsTypeFilter" value="bridge" checked onchange="ttsSaveSettings()"> 브리지</label>
+            <label style="margin-right:6px;"><input type="checkbox" class="ttsTypeFilter" value="p2p" checked onchange="ttsSaveSettings()"> 개인이체</label>
+          </div>
+        </div>
+
+        <div style="display:flex;gap:6px;justify-content:flex-end;">
+          <button onclick="ttsTestSiren()" style="font-size:11px;padding:3px 10px;cursor:pointer;">🚨 사이렌 테스트</button>
+          <button onclick="ttsTestVoice()" style="font-size:11px;padding:3px 10px;cursor:pointer;">🎤 음성 테스트</button>
+          <button onclick="ttsResetSettings()" style="font-size:11px;padding:3px 10px;cursor:pointer;">초기화</button>
+          <button onclick="ttsCloseSettings()" style="font-size:11px;padding:3px 16px;cursor:pointer;font-weight:bold;">닫기</button>
+        </div>
       </div>
     </div>
   </div>
@@ -2449,42 +2570,147 @@ function whaleToggle(){
 }
 
 // ════════════════════════════════════════════
-// TTS 음성 알림
+// TTS 음성 알림 (상세 설정)
 // ════════════════════════════════════════════
 var TTS = {
-  enabled: false,
-  minUsd: 100000,
-  queue: [],
-  speaking: false,
+  enabled: true,           // 마스터 토글
+  voiceEnabled: true,      // 음성 사용
+  voiceMinUsd: 0,          // 음성 임계값
+  voiceRate: 1.1,          // 속도
+  voicePitch: 1.0,         // 음높이
+  voiceVolume: 1.0,        // 음량
+  voiceName: '',           // 선택된 음성
+  sirenEnabled: true,      // 사이렌 사용
+  sirenMinUsd: 1000000,    // 사이렌 임계값
+  sirenType: 'sweep',      // 종류
+  sirenRepeat: 1,          // 반복
+  sirenVolume: 0.25,       // 음량
+  chainFilter: ['eth','bsc','arb','base','poly','sol'],
+  typeFilter: ['cex_out','cex_in','dex_swap','bridge','p2p'],
   lastHashes: new Set()
 };
 
-function ttsInit(){
+var TTS_DEFAULTS = JSON.parse(JSON.stringify({
+  enabled: true, voiceEnabled: true, voiceMinUsd: 0, voiceRate: 1.1,
+  voicePitch: 1.0, voiceVolume: 1.0, voiceName: '',
+  sirenEnabled: true, sirenMinUsd: 1000000, sirenType: 'sweep',
+  sirenRepeat: 1, sirenVolume: 0.25,
+  chainFilter: ['eth','bsc','arb','base','poly','sol'],
+  typeFilter: ['cex_out','cex_in','dex_swap','bridge','p2p']
+}));
+
+function ttsLoadSettings(){
   try {
-    var saved = localStorage.getItem('tts_enabled');
-    TTS.enabled = saved === null ? true : saved === '1';
-    TTS.minUsd = parseInt(localStorage.getItem('tts_min_usd') || '100000');
-  } catch(e){ TTS.enabled = true; }
-  var cb = document.getElementById('ttsEnabled');
-  if(cb) cb.checked = TTS.enabled;
-  var sel = document.getElementById('ttsMinUsd');
-  if(sel) sel.value = String(TTS.minUsd);
+    var raw = localStorage.getItem('tts_settings_v2');
+    if(raw){
+      var s = JSON.parse(raw);
+      Object.keys(s).forEach(function(k){ TTS[k] = s[k]; });
+    }
+  } catch(e){}
+}
+
+function ttsPersistSettings(){
+  try {
+    var s = {
+      enabled: TTS.enabled, voiceEnabled: TTS.voiceEnabled, voiceMinUsd: TTS.voiceMinUsd,
+      voiceRate: TTS.voiceRate, voicePitch: TTS.voicePitch, voiceVolume: TTS.voiceVolume,
+      voiceName: TTS.voiceName, sirenEnabled: TTS.sirenEnabled, sirenMinUsd: TTS.sirenMinUsd,
+      sirenType: TTS.sirenType, sirenRepeat: TTS.sirenRepeat, sirenVolume: TTS.sirenVolume,
+      chainFilter: TTS.chainFilter, typeFilter: TTS.typeFilter
+    };
+    localStorage.setItem('tts_settings_v2', JSON.stringify(s));
+  } catch(e){}
+}
+
+function ttsApplyToUI(){
+  var get = function(id){ return document.getElementById(id); };
+  if(get('ttsEnabled')) get('ttsEnabled').checked = TTS.enabled;
+  if(get('ttsVoiceEnabled')) get('ttsVoiceEnabled').checked = TTS.voiceEnabled;
+  if(get('ttsVoiceMinUsd')) get('ttsVoiceMinUsd').value = String(TTS.voiceMinUsd);
+  if(get('ttsRate')){ get('ttsRate').value = TTS.voiceRate; get('ttsRateLabel').textContent = TTS.voiceRate; }
+  if(get('ttsPitch')){ get('ttsPitch').value = TTS.voicePitch; get('ttsPitchLabel').textContent = TTS.voicePitch; }
+  if(get('ttsVolume')){ get('ttsVolume').value = TTS.voiceVolume; get('ttsVolumeLabel').textContent = Math.round(TTS.voiceVolume*100); }
+  if(get('ttsSirenEnabled')) get('ttsSirenEnabled').checked = TTS.sirenEnabled;
+  if(get('ttsSirenMinUsd')) get('ttsSirenMinUsd').value = String(TTS.sirenMinUsd);
+  if(get('ttsSirenType')) get('ttsSirenType').value = TTS.sirenType;
+  if(get('ttsSirenRepeat')) get('ttsSirenRepeat').value = String(TTS.sirenRepeat);
+  if(get('ttsSirenVolume')){ get('ttsSirenVolume').value = TTS.sirenVolume; get('ttsSirenVolumeLabel').textContent = Math.round(TTS.sirenVolume*100); }
+  document.querySelectorAll('.ttsChainFilter').forEach(function(cb){
+    cb.checked = TTS.chainFilter.indexOf(cb.value) >= 0;
+  });
+  document.querySelectorAll('.ttsTypeFilter').forEach(function(cb){
+    cb.checked = TTS.typeFilter.indexOf(cb.value) >= 0;
+  });
+}
+
+function ttsLoadVoices(){
+  if(!('speechSynthesis' in window)) return;
+  var voices = window.speechSynthesis.getVoices();
+  var sel = document.getElementById('ttsVoice');
+  if(!sel) return;
+  sel.innerHTML = '<option value="">기본 (시스템)</option>';
+  voices.filter(function(v){ return v.lang.startsWith('ko') || v.lang.startsWith('en'); })
+    .forEach(function(v){
+      var opt = document.createElement('option');
+      opt.value = v.name;
+      opt.textContent = v.name + ' (' + v.lang + ')';
+      if(v.name === TTS.voiceName) opt.selected = true;
+      sel.appendChild(opt);
+    });
+}
+
+function ttsInit(){
+  ttsLoadSettings();
+  ttsApplyToUI();
+  if('speechSynthesis' in window){
+    ttsLoadVoices();
+    if(window.speechSynthesis.onvoiceschanged !== undefined){
+      window.speechSynthesis.onvoiceschanged = ttsLoadVoices;
+    }
+  }
 }
 
 function ttsToggle(){
   var cb = document.getElementById('ttsEnabled');
-  TTS.enabled = !!cb?.checked;
-  try { localStorage.setItem('tts_enabled', TTS.enabled ? '1' : '0'); } catch(e){}
-  if(TTS.enabled){
-    // 사용자 클릭 이벤트 안에서 첫 발화 → 브라우저 오디오 권한 확보
-    ttsSpeak('음성 알림이 활성화되었습니다');
-  }
+  TTS.enabled = !!(cb && cb.checked);
+  ttsPersistSettings();
+  if(TTS.enabled) ttsSpeak('알림이 활성화되었습니다');
 }
 
 function ttsSaveSettings(){
-  var sel = document.getElementById('ttsMinUsd');
-  if(sel) TTS.minUsd = parseInt(sel.value);
-  try { localStorage.setItem('tts_min_usd', String(TTS.minUsd)); } catch(e){}
+  var get = function(id){ return document.getElementById(id); };
+  if(get('ttsVoiceEnabled')) TTS.voiceEnabled = get('ttsVoiceEnabled').checked;
+  if(get('ttsVoiceMinUsd')) TTS.voiceMinUsd = parseInt(get('ttsVoiceMinUsd').value);
+  if(get('ttsRate')) TTS.voiceRate = parseFloat(get('ttsRate').value);
+  if(get('ttsPitch')) TTS.voicePitch = parseFloat(get('ttsPitch').value);
+  if(get('ttsVolume')) TTS.voiceVolume = parseFloat(get('ttsVolume').value);
+  if(get('ttsVoice')) TTS.voiceName = get('ttsVoice').value;
+  if(get('ttsSirenEnabled')) TTS.sirenEnabled = get('ttsSirenEnabled').checked;
+  if(get('ttsSirenMinUsd')) TTS.sirenMinUsd = parseInt(get('ttsSirenMinUsd').value);
+  if(get('ttsSirenType')) TTS.sirenType = get('ttsSirenType').value;
+  if(get('ttsSirenRepeat')) TTS.sirenRepeat = parseInt(get('ttsSirenRepeat').value);
+  if(get('ttsSirenVolume')) TTS.sirenVolume = parseFloat(get('ttsSirenVolume').value);
+  TTS.chainFilter = Array.from(document.querySelectorAll('.ttsChainFilter:checked')).map(function(cb){ return cb.value; });
+  TTS.typeFilter = Array.from(document.querySelectorAll('.ttsTypeFilter:checked')).map(function(cb){ return cb.value; });
+  ttsPersistSettings();
+}
+
+function ttsOpenSettings(){
+  document.getElementById('ttsSettingsModal').style.display = 'flex';
+  ttsApplyToUI();
+}
+
+function ttsCloseSettings(){
+  document.getElementById('ttsSettingsModal').style.display = 'none';
+}
+
+function ttsResetSettings(){
+  if(!confirm('설정을 기본값으로 초기화하시겠습니까?')) return;
+  Object.keys(TTS_DEFAULTS).forEach(function(k){
+    TTS[k] = Array.isArray(TTS_DEFAULTS[k]) ? TTS_DEFAULTS[k].slice() : TTS_DEFAULTS[k];
+  });
+  ttsPersistSettings();
+  ttsApplyToUI();
 }
 
 function ttsTest(){
@@ -2494,13 +2720,22 @@ function ttsTest(){
   setTimeout(function(){ ttsSpeak('테스트 알림입니다. 이더 BTC 백만달러 거래소 출금.'); }, 1800);
 }
 
+function ttsTestSiren(){ ttsPlaySiren(); }
+function ttsTestVoice(){ ttsSpeak('테스트입니다. 이더리움 비트코인 백만달러 거래소 출금.'); }
+
 function ttsSpeak(text){
   if(!('speechSynthesis' in window)) return;
   try {
     var u = new SpeechSynthesisUtterance(text);
     u.lang = 'ko-KR';
-    u.rate = 1.1;
-    u.volume = 1.0;
+    u.rate = TTS.voiceRate;
+    u.pitch = TTS.voicePitch;
+    u.volume = TTS.voiceVolume;
+    if(TTS.voiceName){
+      var voices = window.speechSynthesis.getVoices();
+      var v = voices.find(function(x){ return x.name === TTS.voiceName; });
+      if(v) u.voice = v;
+    }
     window.speechSynthesis.speak(u);
   } catch(e){ console.warn('tts err:', e); }
 }
@@ -2515,32 +2750,38 @@ function ttsFormatUsd(usd){
 function ttsSpeakTx(r){
   if(!TTS.enabled){ console.log('[TTS] skip: disabled'); return; }
   if(!r || !r.usd){ console.log('[TTS] skip: no usd'); return; }
+  // 체인/유형 필터
+  if(TTS.chainFilter.indexOf(r.chain) < 0){ console.log('[TTS] skip: chain', r.chain); return; }
+  if(r.tx_type && TTS.typeFilter.indexOf(r.tx_type) < 0){ console.log('[TTS] skip: type', r.tx_type); return; }
   // 중복 방지
   var key = r.chain+':'+r.hash+':'+r.from+':'+r.to;
-  if(TTS.lastHashes.has(key)){ console.log('[TTS] skip: dup', key); return; }
+  if(TTS.lastHashes.has(key)){ console.log('[TTS] skip: dup'); return; }
   TTS.lastHashes.add(key);
   if(TTS.lastHashes.size > 500){
     TTS.lastHashes = new Set(Array.from(TTS.lastHashes).slice(-300));
   }
-  console.log('[TTS] speaking:', r.chain, r.sym, '$'+r.usd);
+  console.log('[TTS] tx:', r.chain, r.sym, '$'+Math.round(r.usd));
 
-  // 사이렌 먼저 재생 (모든 임계값 통과 건)
-  ttsPlaySiren();
+  var playSiren = TTS.sirenEnabled && r.usd >= TTS.sirenMinUsd;
+  var playVoice = TTS.voiceEnabled && r.usd >= TTS.voiceMinUsd;
 
-  var chainName = {eth:'이더',bsc:'비엔비',arb:'아비트럼',base:'베이스',poly:'폴리곤',sol:'솔라나'}[r.chain] || r.chain;
-  var typeStr = '';
-  if(r.tx_type === 'cex_out') typeStr = (r.tx_tag||r.fromEx||'거래소')+' 출금';
-  else if(r.tx_type === 'cex_in') typeStr = (r.tx_tag||r.toEx||'거래소')+' 입금';
-  else if(r.tx_type === 'dex_swap') typeStr = '덱스 스왑';
-  else if(r.tx_type === 'bridge') typeStr = '브리지';
-  else typeStr = '개인 이체';
+  if(playSiren) ttsPlaySiren();
 
-  var text = chainName+' '+r.sym+' '+ttsFormatUsd(r.usd)+'달러 '+typeStr;
-  // 사이렌 후 TTS
-  setTimeout(function(){ ttsSpeak(text); }, 1800);
+  if(playVoice){
+    var chainName = {eth:'이더',bsc:'비엔비',arb:'아비트럼',base:'베이스',poly:'폴리곤',sol:'솔라나'}[r.chain] || r.chain;
+    var typeStr = '';
+    if(r.tx_type === 'cex_out') typeStr = (r.tx_tag||r.fromEx||'거래소')+' 출금';
+    else if(r.tx_type === 'cex_in') typeStr = (r.tx_tag||r.toEx||'거래소')+' 입금';
+    else if(r.tx_type === 'dex_swap') typeStr = '덱스 스왑';
+    else if(r.tx_type === 'bridge') typeStr = '브리지';
+    else typeStr = '개인 이체';
+    var text = chainName+' '+r.sym+' '+ttsFormatUsd(r.usd)+'달러 '+typeStr;
+    if(playSiren) setTimeout(function(){ ttsSpeak(text); }, 1800);
+    else ttsSpeak(text);
+  }
 }
 
-// Web Audio API로 사이렌 소리 생성 (1.5초간 up-down sweep 2회)
+// Web Audio API로 사이렌 소리 생성
 var _audioCtx = null;
 function ttsPlaySiren(){
   try {
@@ -2550,39 +2791,70 @@ function ttsPlaySiren(){
     var ctx = _audioCtx;
     if(ctx.state === 'suspended') ctx.resume();
 
-    var now = ctx.currentTime;
-    var duration = 1.5;
+    var repeat = TTS.sirenRepeat || 1;
+    var type = TTS.sirenType || 'sweep';
+    var vol = TTS.sirenVolume;
 
-    // 오실레이터 (톱니파로 더 자극적)
-    var osc = ctx.createOscillator();
-    osc.type = 'sawtooth';
-
-    // 게인 (볼륨 조절)
-    var gain = ctx.createGain();
-    gain.gain.setValueAtTime(0, now);
-    gain.gain.linearRampToValueAtTime(0.25, now + 0.05);
-    gain.gain.setValueAtTime(0.25, now + duration - 0.1);
-    gain.gain.linearRampToValueAtTime(0, now + duration);
-
-    // 필터로 날카로움 완화
-    var filter = ctx.createBiquadFilter();
-    filter.type = 'lowpass';
-    filter.frequency.value = 2000;
-
-    osc.connect(filter);
-    filter.connect(gain);
-    gain.connect(ctx.destination);
-
-    // 주파수 스윕: 사이렌 소리 (700Hz ↔ 1400Hz 왕복)
-    osc.frequency.setValueAtTime(700, now);
-    osc.frequency.linearRampToValueAtTime(1400, now + 0.375);
-    osc.frequency.linearRampToValueAtTime(700, now + 0.75);
-    osc.frequency.linearRampToValueAtTime(1400, now + 1.125);
-    osc.frequency.linearRampToValueAtTime(700, now + 1.5);
-
-    osc.start(now);
-    osc.stop(now + duration);
+    for(var rep=0; rep<repeat; rep++){
+      var startOffset = rep * (type==='beep'?0.4:type==='klaxon'?0.6:type==='alarm'?0.5:1.6);
+      ttsRenderSiren(ctx, type, vol, startOffset);
+    }
   } catch(e){ console.warn('siren err:', e); }
+}
+
+function ttsRenderSiren(ctx, type, vol, offset){
+  var now = ctx.currentTime + (offset||0);
+  var osc = ctx.createOscillator();
+  var gain = ctx.createGain();
+  var filter = ctx.createBiquadFilter();
+  filter.type = 'lowpass';
+  filter.frequency.value = 2500;
+  osc.connect(filter);
+  filter.connect(gain);
+  gain.connect(ctx.destination);
+
+  if(type === 'sweep'){
+    osc.type = 'sawtooth';
+    var dur = 1.5;
+    gain.gain.setValueAtTime(0, now);
+    gain.gain.linearRampToValueAtTime(vol, now+0.05);
+    gain.gain.setValueAtTime(vol, now+dur-0.1);
+    gain.gain.linearRampToValueAtTime(0, now+dur);
+    osc.frequency.setValueAtTime(700, now);
+    osc.frequency.linearRampToValueAtTime(1400, now+0.375);
+    osc.frequency.linearRampToValueAtTime(700, now+0.75);
+    osc.frequency.linearRampToValueAtTime(1400, now+1.125);
+    osc.frequency.linearRampToValueAtTime(700, now+dur);
+    osc.start(now); osc.stop(now+dur);
+  } else if(type === 'beep'){
+    osc.type = 'sine';
+    var dur = 0.3;
+    gain.gain.setValueAtTime(0, now);
+    gain.gain.linearRampToValueAtTime(vol, now+0.02);
+    gain.gain.setValueAtTime(vol, now+dur-0.05);
+    gain.gain.linearRampToValueAtTime(0, now+dur);
+    osc.frequency.value = 1000;
+    osc.start(now); osc.stop(now+dur);
+  } else if(type === 'klaxon'){
+    osc.type = 'square';
+    var dur = 0.5;
+    gain.gain.setValueAtTime(0, now);
+    gain.gain.linearRampToValueAtTime(vol, now+0.05);
+    gain.gain.setValueAtTime(vol, now+dur-0.05);
+    gain.gain.linearRampToValueAtTime(0, now+dur);
+    osc.frequency.setValueAtTime(440, now);
+    osc.frequency.setValueAtTime(550, now+0.25);
+    osc.start(now); osc.stop(now+dur);
+  } else if(type === 'alarm'){
+    osc.type = 'triangle';
+    var dur = 0.4;
+    gain.gain.setValueAtTime(0, now);
+    gain.gain.linearRampToValueAtTime(vol, now+0.02);
+    gain.gain.linearRampToValueAtTime(0, now+dur);
+    osc.frequency.setValueAtTime(2000, now);
+    osc.frequency.linearRampToValueAtTime(2500, now+dur);
+    osc.start(now); osc.stop(now+dur);
+  }
 }
 
 // 페이지 로드 시 설정 복원
