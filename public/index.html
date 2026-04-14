@@ -1908,6 +1908,7 @@ window.addEventListener('DOMContentLoaded', function(){
           <th>시간</th>
           <th>체인</th>
           <th>유형</th>
+          <th title="이상거래 신호">신호</th>
           <th>토큰</th>
           <th style="text-align:right;">수량</th>
           <th style="text-align:right;">공급%</th>
@@ -1918,7 +1919,7 @@ window.addEventListener('DOMContentLoaded', function(){
         </tr>
       </thead>
       <tbody id="whaleBody">
-        <tr><td colspan="10" style="padding:30px;text-align:center;color:#404040;">▶ 시작 버튼을 눌러 실시간 WebSocket 모니터링을 시작하세요</td></tr>
+        <tr><td colspan="11" style="padding:30px;text-align:center;color:#404040;">▶ 시작 버튼을 눌러 실시간 WebSocket 모니터링을 시작하세요</td></tr>
       </tbody>
     </table>
   </div>
@@ -3362,7 +3363,7 @@ function whaleRender(){
   var countEl = document.getElementById('whaleFilterCount');
   if(countEl) countEl.textContent = filtered.length + '/' + WHALE.rows.length + '건';
   if(!filtered.length){
-    body.innerHTML = '<tr><td colspan="10" style="padding:30px;text-align:center;color:#404040;">'+(WHALE.rows.length?'필터 결과 없음':'감지된 트랜잭션 없음')+'</td></tr>';
+    body.innerHTML = '<tr><td colspan="11" style="padding:30px;text-align:center;color:#404040;">'+(WHALE.rows.length?'필터 결과 없음':'감지된 트랜잭션 없음')+'</td></tr>';
     return;
   }
   var chainColor = {eth:'#627eea',bsc:'#f0b90b',arb:'#28a0f0',base:'#0052ff',poly:'#8247e5',sol:'#9945ff'};
@@ -3404,6 +3405,7 @@ function whaleRender(){
       '<td style="white-space:nowrap;">'+ago+'</td>'+
       '<td><span style="color:'+(chainColor[r.chain]||'#000')+';font-weight:bold;">'+r.chain.toUpperCase()+'</span></td>'+
       '<td>'+whaleTypeBadge(r)+'</td>'+
+      '<td>'+signalBadges(r.signals)+'</td>'+
       '<td style="font-weight:bold;">'+r.sym+'</td>'+
       '<td style="text-align:right;">'+fN(r.amt)+'</td>'+
       '<td style="text-align:right;color:'+pctColor+';font-weight:bold;">'+pctStr+'</td>'+
@@ -3413,6 +3415,26 @@ function whaleRender(){
       '<td><a href="'+exp+'/tx/'+r.hash+'" target="_blank" style="color:#0000ff;">TX↗</a></td>'+
     '</tr>';
   }).join('');
+}
+
+// 이상거래 신호 배지 렌더링
+function signalBadges(signals){
+  if(!signals || !signals.length) return '<span style="color:#c0c0c0;">—</span>';
+  var sevColor = {critical:'#800000', high:'#c05000', med:'#808000', low:'#000080'};
+  var sevOrder = {critical:4, high:3, med:2, low:1};
+  var sorted = signals.slice().sort(function(a,b){ return (sevOrder[b.severity]||0) - (sevOrder[a.severity]||0); });
+  var top3 = sorted.slice(0,3);
+  var remaining = sorted.length - top3.length;
+  var html = top3.map(function(s){
+    var col = sevColor[s.severity] || '#404040';
+    var tip = (s.label + ' — ' + (s.desc||'')).replace(/"/g,'&quot;');
+    return '<span title="'+tip+'" style="display:inline-block;background:'+col+';color:#fff;padding:1px 4px;font-size:10px;font-weight:bold;margin-right:2px;cursor:help;border-radius:2px;">'+s.emoji+'</span>';
+  }).join('');
+  if(remaining > 0){
+    var extraTip = sorted.slice(3).map(function(s){return s.emoji+' '+s.label;}).join(', ');
+    html += '<span title="'+extraTip+'" style="font-size:9px;color:#404040;cursor:help;">+'+remaining+'</span>';
+  }
+  return html;
 }
 </script>
 

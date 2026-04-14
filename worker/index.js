@@ -80,6 +80,7 @@ try { db.exec('ALTER TABLE txs ADD COLUMN to_ens TEXT'); } catch (e) {}
 try { db.exec('ALTER TABLE txs ADD COLUMN to_flags TEXT'); } catch (e) {}
 try { db.exec('ALTER TABLE txs ADD COLUMN from_arkham TEXT'); } catch (e) {}
 try { db.exec('ALTER TABLE txs ADD COLUMN to_arkham TEXT'); } catch (e) {}
+try { db.exec('ALTER TABLE txs ADD COLUMN signals TEXT'); } catch (e) {}
 
 // 사용자 라벨 테이블 (다중 사용자 공유)
 db.exec(`
@@ -108,8 +109,8 @@ console.log(`[DB] SQLite at ${DB_PATH} — ${dbCount} txs, ${labelCount} labels`
 
 // Prepared statements
 const stmtInsert = db.prepare(`
-  INSERT OR IGNORE INTO txs (ts, chain, sym, ca, amt, price, usd, supply_pct, ex_from, ex_to, addr_from, addr_to, hash, tx_type, tx_tag, from_age, to_age, from_ens, to_ens, to_flags, from_arkham, to_arkham)
-  VALUES (@ts, @chain, @sym, @ca, @amt, @price, @usd, @supply_pct, @ex_from, @ex_to, @addr_from, @addr_to, @hash, @tx_type, @tx_tag, @from_age, @to_age, @from_ens, @to_ens, @to_flags, @from_arkham, @to_arkham)
+  INSERT OR IGNORE INTO txs (ts, chain, sym, ca, amt, price, usd, supply_pct, ex_from, ex_to, addr_from, addr_to, hash, tx_type, tx_tag, from_age, to_age, from_ens, to_ens, to_flags, from_arkham, to_arkham, signals)
+  VALUES (@ts, @chain, @sym, @ca, @amt, @price, @usd, @supply_pct, @ex_from, @ex_to, @addr_from, @addr_to, @hash, @tx_type, @tx_tag, @from_age, @to_age, @from_ens, @to_ens, @to_flags, @from_arkham, @to_arkham, @signals)
 `);
 const stmtRecent = db.prepare(`SELECT * FROM txs ORDER BY ts DESC LIMIT ?`);
 const stmtFilter = db.prepare(`
@@ -551,6 +552,104 @@ function formatAge(age) {
   if (!age) return '?d';
   if (age.days >= 365) return Math.floor(age.days / 365) + 'y';
   return age.days + 'd';
+}
+
+// ── 이상거래 신호 탐지 ──
+// 반환: [{code, emoji, label, desc, severity}]
+function detectSignals(ctx) {
+  const out = [];
+  const { chain, sym, amt, usd, supplyPct, from, to, fromEx, toEx, fromAge, toAge, fromArkham, toArkham } = ctx;
+  const now = Date.now();
+
+  // A. 지갑 행동 이상 (단일 TX)
+  if (fromAge && fromAge.days >= 730) {
+    out.push({ code: 'diamond', emoji: '💎', label: '장기보유 이탈', desc: `${Math.floor(fromAge.days/365)}년+ 보유 지갑 첫 이체`, severity: 'high' });
+  } else if (fromAge && fromAge.days >= 365) {
+    out.push({ code: 'dormant', emoji: '🌙', label: '휴면지갑 활성', desc: `${Math.floor(fromAge.days/365)}년 휴면 지갑 활성화`, severity: 'high' });
+  }
+
+  // 탈출 패턴: 신규지갑 → 거래소
+  if (toEx && fromAge && fromAge.days <= 7) {
+    out.push({ code: 'escape', emoji: '🎭', label: '탈출 의심', desc: `신규지갑(${fromAge.days}d) → 거래소 입금`, severity: 'high' });
+  }
+
+  // Arkham 기반 신호
+  const fundRe = /fund|vc|venture|capital|foundation|treasury/i;
+  if (fromArkham && fundRe.test((fromArkham.type || '') + ' ' + (fromArkham.name || ''))) {
+    out.push({ code: 'fund_out', emoji: '🏛', label: '펀드 출고', desc: `${fromArkham.name} 이동`, severity: 'high' });
+  }
+  if (toArkham && fundRe.test((toArkham.type || '') + ' ' + (toArkham.name || ''))) {
+    out.push({ code: 'fund_in', emoji: '🏛', label: '펀드 입고', desc: `→ ${toArkham.name}`, severity: 'med' });
+  }
+  if (fromArkham && toArkham && !fromEx && !toEx) {
+    out.push({ code: 'w2w', emoji: '🤝', label: 'Whale↔Whale', desc: `${fromArkham.name} → ${toArkham.name}`, severity: 'med' });
+  }
+
+  // C. 크기 이상
+  if (supplyPct >= 1) {
+    out.push({ code: 'supply', emoji: '🐋', label: '공급량 1%+', desc: `전체 공급의 ${supplyPct.toFixed(2)}%`, severity: 'high' });
+  }
+  if (usd >= 5e6) {
+    out.push({ code: 'mega', emoji: '💰', label: '메가 TX', desc: `$${(usd/1e6).toFixed(1)}M 단일 이체`, severity: 'critical' });
+  }
+
+  // B. 패턴 신호 (DB 쿼리)
+  try {
+    // 집중 매집: 5분 내 같은 토큰 수신 3건+ 합 $1M+
+    const accum = db.prepare(`
+      SELECT COUNT(DISTINCT addr_to) AS uniq, SUM(usd) AS total, COUNT(*) AS cnt
+      FROM txs WHERE sym=? AND chain=? AND ts>=?
+    `).get(sym, chain, now - 5*60*1000);
+    if (accum && accum.uniq >= 3 && accum.total >= 1e6) {
+      out.push({ code: 'accum', emoji: '📈', label: '집중 매집', desc: `5분 내 ${accum.uniq}개 지갑 수신 $${(accum.total/1e6).toFixed(1)}M`, severity: 'high' });
+    }
+
+    // 분산 덤핑: 10분 내 3개+ CEX 입금
+    const dump = db.prepare(`
+      SELECT COUNT(DISTINCT ex_to) AS cnt, SUM(usd) AS total
+      FROM txs WHERE sym=? AND chain=? AND ts>=? AND ex_to IS NOT NULL
+    `).get(sym, chain, now - 10*60*1000);
+    if (dump && dump.cnt >= 3) {
+      out.push({ code: 'dump', emoji: '📉', label: '분산 덤핑', desc: `10분 내 ${dump.cnt}개 거래소 입금 $${(dump.total/1e6).toFixed(1)}M`, severity: 'critical' });
+    }
+
+    // 출금 러시: 10분 내 3개+ CEX 출금
+    const rush = db.prepare(`
+      SELECT COUNT(DISTINCT ex_from) AS cnt, SUM(usd) AS total
+      FROM txs WHERE sym=? AND chain=? AND ts>=? AND ex_from IS NOT NULL
+    `).get(sym, chain, now - 10*60*1000);
+    if (rush && rush.cnt >= 3) {
+      out.push({ code: 'rush', emoji: '💸', label: '출금 러시', desc: `10분 내 ${rush.cnt}개 거래소 출금 $${(rush.total/1e6).toFixed(1)}M`, severity: 'high' });
+    }
+
+    // 조직적 이동: 10분 내 5개+ 다른 지갑 (같은 방향)
+    const coord = db.prepare(`
+      SELECT COUNT(DISTINCT addr_from) AS uniq FROM txs
+      WHERE sym=? AND chain=? AND ts>=?
+    `).get(sym, chain, now - 10*60*1000);
+    if (coord && coord.uniq >= 5) {
+      out.push({ code: 'coord', emoji: '🎪', label: '조직적 이동', desc: `10분 내 ${coord.uniq}개 지갑 동시 이동`, severity: 'high' });
+    }
+
+    // 볼륨 폭증: 1h 거래수 > 7d 평균 × 5
+    const h1 = db.prepare(`SELECT COUNT(*) AS c FROM txs WHERE sym=? AND chain=? AND ts>=?`).get(sym, chain, now - 3600000);
+    const d7 = db.prepare(`SELECT COUNT(*) AS c FROM txs WHERE sym=? AND chain=? AND ts>=?`).get(sym, chain, now - 7*86400000);
+    const d7avgH = d7.c / (7 * 24);
+    if (h1.c >= 5 && d7avgH > 0 && h1.c >= d7avgH * 5) {
+      out.push({ code: 'vol_spike', emoji: '🌊', label: '볼륨 급증', desc: `1h ${h1.c}건 (7d 평균 ${d7avgH.toFixed(1)}건/h 대비 ${(h1.c/d7avgH).toFixed(1)}x)`, severity: 'med' });
+    }
+
+    // 순환 이체: 1h 내 A→B, B→A 존재
+    const circ = db.prepare(`
+      SELECT COUNT(*) AS c FROM txs
+      WHERE chain=? AND ts>=? AND addr_from=? AND addr_to=?
+    `).get(chain, now - 3600000, to, from);
+    if (circ && circ.c > 0) {
+      out.push({ code: 'circular', emoji: '🔄', label: '순환 이체', desc: `1h 내 역방향 이체 감지`, severity: 'critical' });
+    }
+  } catch (e) { /* DB query fail silently */ }
+
+  return out;
 }
 
 // ── ENS reverse lookup (ETH mainnet only, SQLite 캐시) ──
@@ -1211,6 +1310,13 @@ async function handleLog(chain, log_, source) {
     const singleToken = await checkSingleToken(chain, to, ca).catch(() => false);
     if (singleToken) toFlags.push('단일토큰');
 
+    // ── 이상거래 신호 탐지 ──
+    const signals = detectSignals({
+      chain, sym: meta.symbol, ca, amt, usd, supplyPct,
+      from, to, fromEx, toEx,
+      fromAge, toAge, fromArkham, toArkham, txClass,
+    });
+
     state.stats.detected++;
     const r = {
       chain, sym: meta.symbol, ca, amt, price, usd,
@@ -1220,6 +1326,7 @@ async function handleLog(chain, log_, source) {
       fromArkham: fromArkham?.name || null,
       toArkham: toArkham?.name || null,
       toFlags: toFlags.length ? toFlags : null,
+      signals: signals.length ? signals : null,
       tx_type: txClass.type,
       tx_label: txClass.label,
       tx_tag: txClass.tag,
@@ -1239,6 +1346,7 @@ async function handleLog(chain, log_, source) {
         from_ens: r.fromENS || null, to_ens: r.toENS || null,
         to_flags: r.toFlags ? r.toFlags.join(',') : null,
         from_arkham: r.fromArkham || null, to_arkham: r.toArkham || null,
+        signals: r.signals ? JSON.stringify(r.signals) : null,
       });
     } catch (e) { console.warn('db insert err:', e.message); }
 
@@ -1774,7 +1882,7 @@ const httpServer = http.createServer(async (req, res) => {
         from: row.addr_from, to: row.addr_to,
         fromEx: row.ex_from, toEx: row.ex_to, hash: row.hash,
         tx_type: row.tx_type, tx_tag: row.tx_tag,
-        fromAge: row.from_age, toAge: row.to_age, fromENS: row.from_ens, toENS: row.to_ens, toFlags: row.to_flags ? row.to_flags.split(',') : null, fromArkham: row.from_arkham, toArkham: row.to_arkham,
+        fromAge: row.from_age, toAge: row.to_age, fromENS: row.from_ens, toENS: row.to_ens, toFlags: row.to_flags ? row.to_flags.split(',') : null, fromArkham: row.from_arkham, toArkham: row.to_arkham, signals: row.signals ? (function(){try{return JSON.parse(row.signals);}catch(e){return null;}})() : null,
       }));
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ ok: true, count: data.length, data }));
@@ -2261,7 +2369,7 @@ wss.on('connection', (clientWs, req) => {
       from: row.addr_from, to: row.addr_to,
       fromEx: row.ex_from, toEx: row.ex_to, hash: row.hash,
       tx_type: row.tx_type, tx_tag: row.tx_tag,
-      fromAge: row.from_age, toAge: row.to_age, fromENS: row.from_ens, toENS: row.to_ens, toFlags: row.to_flags ? row.to_flags.split(',') : null, fromArkham: row.from_arkham, toArkham: row.to_arkham,
+      fromAge: row.from_age, toAge: row.to_age, fromENS: row.from_ens, toENS: row.to_ens, toFlags: row.to_flags ? row.to_flags.split(',') : null, fromArkham: row.from_arkham, toArkham: row.to_arkham, signals: row.signals ? (function(){try{return JSON.parse(row.signals);}catch(e){return null;}})() : null,
     }));
     const total = db.prepare('SELECT COUNT(*) AS c FROM txs').get().c;
     let labels = [];
