@@ -558,7 +558,7 @@ function formatAge(age) {
 // 반환: [{code, emoji, label, desc, severity}]
 function detectSignals(ctx) {
   const out = [];
-  const { chain, sym, amt, usd, supplyPct, from, to, fromEx, toEx, fromAge, toAge, fromArkham, toArkham } = ctx;
+  const { chain, sym, amt, usd, supplyPct, from, to, fromEx, toEx, fromAge, toAge, fromArkham, toArkham, txClass } = ctx;
   const now = Date.now();
 
   // A. 지갑 행동 이상 (단일 TX)
@@ -646,6 +646,29 @@ function detectSignals(ctx) {
     `).get(chain, now - 3600000, to, from);
     if (circ && circ.c > 0) {
       out.push({ code: 'circular', emoji: '🔄', label: '순환 이체', desc: `1h 내 역방향 이체 감지`, severity: 'critical' });
+    }
+
+    // 🔀 수령 후 처분 — 이 지갑이 최근에 같은 토큰을 받았고 지금 송금 중
+    // 조건: 송신자가 거래소가 아니고(보통 지갑), 24h 내 같은 토큰 수령 이력 있음
+    if (!fromEx && txClass && txClass.type !== 'cex_in') {
+      const prior = db.prepare(`
+        SELECT MIN(ts) AS first_recv, MAX(ts) AS last_recv, COUNT(*) AS cnt, SUM(usd) AS total
+        FROM txs
+        WHERE addr_to = ? AND sym = ? AND chain = ?
+          AND ts >= ? AND ts < ?
+      `).get(from.toLowerCase(), sym, chain, now - 24*3600*1000, now - 10*1000); // 10초 버퍼(자기 자신 제외)
+      if (prior && prior.cnt > 0) {
+        const hoursAgo = Math.max(1, Math.floor((now - prior.last_recv) / 3600000));
+        const dest = toEx ? `거래소(${toEx})` : 'DEX/지갑';
+        const severity = toEx ? 'critical' : 'high'; // 거래소 입금이면 더 위험
+        out.push({
+          code: 'swap_after',
+          emoji: '🔀',
+          label: '수령 후 처분',
+          desc: `${hoursAgo}h 전 ${sym} 수령 (${prior.cnt}회, $${(prior.total/1e6).toFixed(2)}M) → ${dest}`,
+          severity,
+        });
+      }
     }
   } catch (e) { /* DB query fail silently */ }
 
