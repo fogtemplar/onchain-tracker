@@ -1869,6 +1869,38 @@ window.addEventListener('DOMContentLoaded', function(){
       </div>
     </div>
   </div>
+
+  <!-- ═══ 지갑 라벨 편집 모달 ═══ -->
+  <div id="labelEditorModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:10001;align-items:center;justify-content:center;">
+    <div style="background:#c0c0c0;border:2px solid #fff;box-shadow:4px 4px 0 #000;width:480px;font-family:'MS Sans Serif',sans-serif;">
+      <div style="background:#000080;color:#fff;padding:4px 8px;font-size:12px;font-weight:bold;display:flex;justify-content:space-between;">
+        <span>🏷 지갑 라벨 편집 (모두에게 공유됨)</span>
+        <span onclick="labelClose()" style="cursor:pointer;padding:0 6px;">✕</span>
+      </div>
+      <div style="padding:12px;font-size:11px;color:#000;">
+        <div style="margin-bottom:8px;font-family:monospace;font-size:10px;color:#404040;word-break:break-all;background:#fff;padding:4px 6px;border:1px inset #808080;" id="labelEditAddr"></div>
+        <div style="margin-bottom:8px;">
+          <label style="display:block;margin-bottom:2px;font-weight:bold;">라벨 (필수, 최대 80자)</label>
+          <input id="labelEditInput" type="text" maxlength="80" style="width:100%;font-size:12px;padding:3px;" placeholder="예: 큰손지갑 / 팀지갑 / 봇 ..." />
+        </div>
+        <div style="margin-bottom:8px;">
+          <label style="display:block;margin-bottom:2px;font-weight:bold;">색상</label>
+          <input id="labelEditColor" type="color" value="#000080" style="width:60px;height:24px;cursor:pointer;" />
+          <span style="font-size:10px;color:#404040;margin-left:6px;">배지 배경 색상</span>
+        </div>
+        <div style="margin-bottom:10px;">
+          <label style="display:block;margin-bottom:2px;font-weight:bold;">메모 (선택, 최대 500자)</label>
+          <textarea id="labelEditNote" maxlength="500" rows="3" style="width:100%;font-size:11px;padding:3px;" placeholder="추가 정보..."></textarea>
+        </div>
+        <div style="display:flex;gap:6px;justify-content:flex-end;">
+          <button id="labelEditDelBtn" onclick="labelDelete()" style="font-size:11px;padding:3px 10px;cursor:pointer;color:#800000;">🗑 삭제</button>
+          <button onclick="labelClose()" style="font-size:11px;padding:3px 10px;cursor:pointer;">취소</button>
+          <button onclick="labelSave()" style="font-size:11px;padding:3px 16px;cursor:pointer;font-weight:bold;">저장</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <div style="overflow-x:auto;">
     <table id="whaleTbl" style="width:100%;border-collapse:collapse;font-size:11px;">
       <thead>
@@ -2860,6 +2892,133 @@ function ttsRenderSiren(ctx, type, vol, offset){
 // 페이지 로드 시 설정 복원
 setTimeout(ttsInit, 500);
 
+// ════════════════════════════════════════════
+// 지갑 라벨 (서버 공유)
+// ════════════════════════════════════════════
+var LABELS = {
+  map: {},        // addr(lowercase) → {label, color, note, created_by, updated_at}
+  loaded: false
+};
+
+function labelsHttpBase(){
+  if(typeof RAILWAY_WS_URL === 'undefined' || !RAILWAY_WS_URL) return null;
+  return RAILWAY_WS_URL.replace(/^wss?:/, RAILWAY_WS_URL.startsWith('wss')?'https:':'http:').replace(/\/ws$/, '');
+}
+
+async function labelsLoadAll(){
+  var base = labelsHttpBase();
+  if(!base) return;
+  try {
+    var r = await fetch(base+'/labels', {signal: AbortSignal.timeout(10000)});
+    var d = await r.json();
+    if(d.ok){
+      LABELS.map = {};
+      (d.data||[]).forEach(function(l){ LABELS.map[l.addr.toLowerCase()] = l; });
+      LABELS.loaded = true;
+      console.log('[labels] loaded', d.count);
+      if(typeof whaleRender === 'function') whaleRender();
+    }
+  } catch(e){ console.warn('labels load err:', e); }
+}
+
+function labelsGet(addr){
+  if(!addr) return null;
+  return LABELS.map[addr.toLowerCase()] || null;
+}
+
+function labelsApplyMessage(msg){
+  if(msg.action === 'set' && msg.data){
+    LABELS.map[msg.data.addr.toLowerCase()] = msg.data;
+  } else if(msg.action === 'del' && msg.addr){
+    delete LABELS.map[msg.addr.toLowerCase()];
+  }
+  if(typeof whaleRender === 'function') whaleRender();
+}
+
+function labelsGetUserId(){
+  try {
+    var u = localStorage.getItem('label_user');
+    if(!u){
+      u = prompt('라벨 작성자 이름을 입력하세요 (한 번만 설정):', '') || 'anonymous';
+      localStorage.setItem('label_user', u);
+    }
+    return u;
+  } catch(e){ return 'anonymous'; }
+}
+
+async function labelOpenEditor(addr){
+  if(!addr) return;
+  var existing = labelsGet(addr);
+  var base = labelsHttpBase();
+  if(!base){ alert('Railway 연결 필요'); return; }
+
+  var modal = document.getElementById('labelEditorModal');
+  document.getElementById('labelEditAddr').textContent = addr;
+  document.getElementById('labelEditInput').value = existing ? existing.label : '';
+  document.getElementById('labelEditColor').value = existing && existing.color ? existing.color : '#000080';
+  document.getElementById('labelEditNote').value = existing && existing.note ? existing.note : '';
+  document.getElementById('labelEditDelBtn').style.display = existing ? 'inline-block' : 'none';
+  modal.dataset.addr = addr;
+  modal.style.display = 'flex';
+  setTimeout(function(){ document.getElementById('labelEditInput').focus(); }, 100);
+}
+
+async function labelSave(){
+  var modal = document.getElementById('labelEditorModal');
+  var addr = modal.dataset.addr;
+  var label = document.getElementById('labelEditInput').value.trim();
+  var color = document.getElementById('labelEditColor').value;
+  var note = document.getElementById('labelEditNote').value.trim();
+  if(!label){ alert('라벨을 입력하세요'); return; }
+  var base = labelsHttpBase();
+  try {
+    var r = await fetch(base+'/labels', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({addr:addr, label:label, color:color, note:note, created_by:labelsGetUserId()})
+    });
+    var d = await r.json();
+    if(d.ok){
+      LABELS.map[addr.toLowerCase()] = d.data;
+      modal.style.display = 'none';
+      if(typeof whaleRender === 'function') whaleRender();
+    } else {
+      alert('저장 실패: '+(d.error||'?'));
+    }
+  } catch(e){ alert('네트워크 오류: '+e.message); }
+}
+
+async function labelDelete(){
+  var modal = document.getElementById('labelEditorModal');
+  var addr = modal.dataset.addr;
+  if(!confirm('라벨을 삭제하시겠습니까?')) return;
+  var base = labelsHttpBase();
+  try {
+    var r = await fetch(base+'/labels?addr='+encodeURIComponent(addr), {method:'DELETE'});
+    var d = await r.json();
+    if(d.ok){
+      delete LABELS.map[addr.toLowerCase()];
+      modal.style.display = 'none';
+      if(typeof whaleRender === 'function') whaleRender();
+    }
+  } catch(e){ alert('네트워크 오류: '+e.message); }
+}
+
+function labelClose(){
+  document.getElementById('labelEditorModal').style.display = 'none';
+}
+
+// 라벨 HTML 생성 헬퍼
+function labelBadgeHtml(addr){
+  var l = labelsGet(addr);
+  if(!l) return '';
+  var color = l.color || '#000080';
+  var tip = (l.note || '') + (l.created_by ? ' (by '+l.created_by+')' : '');
+  return ' <span title="'+tip.replace(/"/g,'&quot;')+'" style="background:'+color+';color:#fff;padding:1px 5px;font-size:9px;font-weight:bold;cursor:help;border-radius:2px;">🏷 '+l.label+'</span>';
+}
+
+setTimeout(labelsLoadAll, 1000);
+
 function whaleSetRailwayUrl(){
   var cur = RAILWAY_WS_URL || 'wss://your-worker.up.railway.app/ws';
   var v = prompt('Railway 워커 WebSocket URL:\n(예: wss://onchain-tracker-production.up.railway.app/ws)', cur);
@@ -2950,6 +3109,12 @@ async function whaleConnectRailway(){
     try {
       var msg = JSON.parse(ev.data);
       if(msg.type === 'init'){
+        // 라벨 동기화
+        if(msg.labels){
+          LABELS.map = {};
+          msg.labels.forEach(function(l){ LABELS.map[l.addr.toLowerCase()] = l; });
+          LABELS.loaded = true;
+        }
         // init 데이터는 과거 tx이므로 TTS 재생 방지 — lastHashes에 등록
         (msg.data||[]).forEach(function(r){
           if(r && r.hash) TTS.lastHashes.add(r.chain+':'+r.hash+':'+r.from+':'+r.to);
@@ -2966,6 +3131,8 @@ async function whaleConnectRailway(){
           document.getElementById('whaleStatus').textContent =
             '🟢 Railway 실시간 — 가동 '+Math.floor(msg.stats.uptime/60)+'분, 누적 '+msg.stats.detected+'건'+dbStr;
         }
+      } else if(msg.type === 'label'){
+        labelsApplyMessage(msg);
       } else if(msg.type === 'tx'){
         // 신규 트랜잭션
         var r = msg.data;
@@ -3210,7 +3377,9 @@ function whaleRender(){
     var toAgeStr = r.toAge ? ' <span style="font-size:9px;color:#808080;font-weight:bold;">['+r.toAge+']</span>' : '';
     var fromPortfolio = r.chain==='sol' ? 'https://jup.ag/portfolio/'+r.from : 'https://debank.com/profile/'+r.from;
     var fromPortName = r.chain==='sol' ? 'Jupiter' : 'DeBank';
-    var fromLinks = '<a href="'+exp+'/address/'+r.from+'" target="_blank" style="font-family:monospace;color:#0000ff;font-size:10px;">'+fromLabel+'</a>'+fromAgeStr+' <a href="'+fromPortfolio+'" target="_blank" style="font-size:9px;color:#008000;">('+fromPortName+')</a>';
+    var fromUserLabel = labelBadgeHtml(r.from);
+    var fromEditBtn = ' <span onclick="labelOpenEditor(\''+r.from+'\')" title="라벨 추가/편집" style="cursor:pointer;font-size:10px;color:#404040;">✏️</span>';
+    var fromLinks = '<a href="'+exp+'/address/'+r.from+'" target="_blank" style="font-family:monospace;color:#0000ff;font-size:10px;">'+fromLabel+'</a>'+fromUserLabel+fromAgeStr+fromEditBtn+' <a href="'+fromPortfolio+'" target="_blank" style="font-size:9px;color:#008000;">('+fromPortName+')</a>';
     var toFlagStr = '';
     if(r.toFlags && r.toFlags.length){
       toFlagStr = ' ' + r.toFlags.map(function(f){
@@ -3221,7 +3390,9 @@ function whaleRender(){
     }
     var toPortfolio = r.chain==='sol' ? 'https://jup.ag/portfolio/'+r.to : 'https://debank.com/profile/'+r.to;
     var toPortName = r.chain==='sol' ? 'Jupiter' : 'DeBank';
-    var toLinks = '<a href="'+exp+'/address/'+r.to+'" target="_blank" style="font-family:monospace;color:#0000ff;font-size:10px;">'+toLabel+'</a>'+toAgeStr+toFlagStr+' <a href="'+toPortfolio+'" target="_blank" style="font-size:9px;color:#008000;">('+toPortName+')</a>';
+    var toUserLabel = labelBadgeHtml(r.to);
+    var toEditBtn = ' <span onclick="labelOpenEditor(\''+r.to+'\')" title="라벨 추가/편집" style="cursor:pointer;font-size:10px;color:#404040;">✏️</span>';
+    var toLinks = '<a href="'+exp+'/address/'+r.to+'" target="_blank" style="font-family:monospace;color:#0000ff;font-size:10px;">'+toLabel+'</a>'+toUserLabel+toAgeStr+toFlagStr+toEditBtn+' <a href="'+toPortfolio+'" target="_blank" style="font-size:9px;color:#008000;">('+toPortName+')</a>';
     return '<tr>'+
       '<td style="white-space:nowrap;">'+ago+'</td>'+
       '<td><span style="color:'+(chainColor[r.chain]||'#000')+';font-weight:bold;">'+r.chain.toUpperCase()+'</span></td>'+

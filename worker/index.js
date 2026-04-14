@@ -77,8 +77,31 @@ try { db.exec('ALTER TABLE txs ADD COLUMN to_age TEXT'); } catch (e) {}
 try { db.exec('ALTER TABLE txs ADD COLUMN from_ens TEXT'); } catch (e) {}
 try { db.exec('ALTER TABLE txs ADD COLUMN to_ens TEXT'); } catch (e) {}
 try { db.exec('ALTER TABLE txs ADD COLUMN to_flags TEXT'); } catch (e) {}
+
+// 사용자 라벨 테이블 (다중 사용자 공유)
+db.exec(`
+  CREATE TABLE IF NOT EXISTS wallet_labels (
+    addr TEXT PRIMARY KEY,
+    label TEXT NOT NULL,
+    color TEXT,
+    note TEXT,
+    created_by TEXT,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+  )
+`);
+const stmtLabelGet = db.prepare('SELECT addr, label, color, note, created_by, updated_at FROM wallet_labels WHERE addr = ?');
+const stmtLabelGetAll = db.prepare('SELECT addr, label, color, note, created_by, updated_at FROM wallet_labels');
+const stmtLabelSet = db.prepare(`
+  INSERT INTO wallet_labels (addr, label, color, note, created_by, created_at, updated_at)
+  VALUES (?, ?, ?, ?, ?, ?, ?)
+  ON CONFLICT(addr) DO UPDATE SET label=excluded.label, color=excluded.color, note=excluded.note, updated_at=excluded.updated_at
+`);
+const stmtLabelDel = db.prepare('DELETE FROM wallet_labels WHERE addr = ?');
+
 const dbCount = db.prepare('SELECT COUNT(*) AS c FROM txs').get().c;
-console.log(`[DB] SQLite at ${DB_PATH} — ${dbCount} rows`);
+const labelCount = db.prepare('SELECT COUNT(*) AS c FROM wallet_labels').get().c;
+console.log(`[DB] SQLite at ${DB_PATH} — ${dbCount} txs, ${labelCount} labels`);
 
 // Prepared statements
 const stmtInsert = db.prepare(`
@@ -1592,7 +1615,7 @@ function connectChainFull(chain) {
 // ── HTTP server (헬스체크 + 최근 트랜잭션 + WebSocket 업그레이드) ──
 function setCors(res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', '*');
 }
 
@@ -2060,6 +2083,82 @@ const httpServer = http.createServer(async (req, res) => {
     return;
   }
 
+  // /labels — 라벨 전체 조회
+  if (req.url === '/labels' && req.method === 'GET') {
+    try {
+      const rows = stmtLabelGetAll.all();
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: true, count: rows.length, data: rows }));
+    } catch (e) {
+      res.writeHead(500);
+      res.end(JSON.stringify({ ok: false, error: e.message }));
+    }
+    return;
+  }
+
+  // POST /labels — 라벨 생성/수정
+  if (req.url === '/labels' && req.method === 'POST') {
+    let body = '';
+    req.on('data', chunk => { body += chunk; if (body.length > 10000) req.destroy(); });
+    req.on('end', () => {
+      try {
+        const d = JSON.parse(body);
+        const addr = (d.addr || '').toLowerCase().trim();
+        const label = (d.label || '').trim().slice(0, 80);
+        const color = (d.color || '').slice(0, 20) || null;
+        const note = (d.note || '').slice(0, 500) || null;
+        const createdBy = (d.created_by || 'anonymous').slice(0, 50);
+        if (!addr || !label) {
+          res.writeHead(400);
+          res.end(JSON.stringify({ ok: false, error: 'addr and label required' }));
+          return;
+        }
+        const now = Date.now();
+        stmtLabelSet.run(addr, label, color, note, createdBy, now, now);
+        const row = stmtLabelGet.get(addr);
+        // 모든 클라이언트에게 broadcast
+        const payload = JSON.stringify({ type: 'label', action: 'set', data: row });
+        for (const client of state.clients) {
+          if (client.readyState === WebSocket.OPEN) {
+            try { client.send(payload); } catch (e) {}
+          }
+        }
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: true, data: row }));
+      } catch (e) {
+        res.writeHead(500);
+        res.end(JSON.stringify({ ok: false, error: e.message }));
+      }
+    });
+    return;
+  }
+
+  // DELETE /labels?addr=0x... — 라벨 삭제
+  if (req.url?.startsWith('/labels') && req.method === 'DELETE') {
+    try {
+      const u = new URL(req.url, 'http://x');
+      const addr = (u.searchParams.get('addr') || '').toLowerCase().trim();
+      if (!addr) {
+        res.writeHead(400);
+        res.end(JSON.stringify({ ok: false, error: 'addr required' }));
+        return;
+      }
+      stmtLabelDel.run(addr);
+      const payload = JSON.stringify({ type: 'label', action: 'del', addr });
+      for (const client of state.clients) {
+        if (client.readyState === WebSocket.OPEN) {
+          try { client.send(payload); } catch (e) {}
+        }
+      }
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: true }));
+    } catch (e) {
+      res.writeHead(500);
+      res.end(JSON.stringify({ ok: false, error: e.message }));
+    }
+    return;
+  }
+
   res.writeHead(404);
   res.end('Not found');
 });
@@ -2082,9 +2181,12 @@ wss.on('connection', (clientWs, req) => {
       fromAge: row.from_age, toAge: row.to_age, fromENS: row.from_ens, toENS: row.to_ens, toFlags: row.to_flags ? row.to_flags.split(',') : null,
     }));
     const total = db.prepare('SELECT COUNT(*) AS c FROM txs').get().c;
+    let labels = [];
+    try { labels = stmtLabelGetAll.all(); } catch (e) {}
     clientWs.send(JSON.stringify({
       type: 'init',
       data,
+      labels,
       stats: {
         detected: state.stats.detected,
         uptime: Math.floor((Date.now() - state.stats.startedAt)/1000),
