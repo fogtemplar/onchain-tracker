@@ -1265,17 +1265,27 @@ async function sendTelegram(text) {
 }
 
 function formatMessage(r) {
-  const tier = r.usd >= 1e6 ? '🔴 1M+' : r.usd >= 5e5 ? '🟠 500K+' : '🟡 100K+';
   const supplyStr = r.supplyPct > 0 ? ` (총 공급량의 ${r.supplyPct.toFixed(2)}%)` : '';
   // 신호 포맷: 이모지 + (한글설명)
   let signalStr = '';
+  let titlePrefix = '';
   if (r.signals && r.signals.length) {
     const sevOrder = { critical: 4, high: 3, med: 2, low: 1 };
     const sorted = r.signals.slice().sort((a, b) => (sevOrder[b.severity] || 0) - (sevOrder[a.severity] || 0));
     signalStr = `\n🚨 <b>이상신호</b>\n` +
       sorted.map(s => `  ${s.emoji} ${s.label}${s.desc ? ' — ' + s.desc : ''}`).join('\n') + '\n';
+    // 특수 신호면 제목 교체 (우선순위: dex_swap_live > swap_after > 일반)
+    const codes = sorted.map(s => s.code);
+    if (codes.includes('dex_swap_live')) titlePrefix = '🔀 <b>DEX 스왑 감지</b>';
+    else if (codes.includes('swap_after')) titlePrefix = '🔀 <b>수령 후 처분 감지</b>';
   }
-  return `${tier} <b>${r.sym}</b> 전송 감지\n\n` +
+  if (!titlePrefix) {
+    const tier = r.usd >= 1e6 ? '🔴 1M+' : r.usd >= 5e5 ? '🟠 500K+' : '🟡 100K+';
+    titlePrefix = `${tier} <b>${r.sym}</b> 전송 감지`;
+  } else {
+    titlePrefix = `${titlePrefix} · <b>${r.sym}</b>`;
+  }
+  return `${titlePrefix}\n\n` +
     `💰 가치: <b>$${fN(r.usd)}</b>\n` +
     `📊 가격: $${r.price < 1 ? r.price.toFixed(6) : r.price.toFixed(4)}\n` +
     `📦 수량: ${fN(r.amt)} ${r.sym}${supplyStr}\n` +
