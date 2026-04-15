@@ -842,19 +842,43 @@ async function resolveArkham(addr) {
       return null;
     }
     const d = await res.json();
-    // 응답 구조: {ethereum: {arkhamEntity: {...}}, bsc: {...}, ...}
+    // 응답 구조: {ethereum: {arkhamEntity: {...}, arkhamLabel: {...}}, bsc: {...}, ...}
+    // 1차: arkhamEntity (소유 엔티티) 우선
+    // 2차: arkhamLabel (기능 라벨: Proxy, Deployer 등) 폴백
     let entity = null;
+    // arkhamEntity 우선 탐색
     for (const chain in d) {
       const obj = d[chain];
       if (obj && obj.arkhamEntity && obj.arkhamEntity.name) {
+        let name = obj.arkhamEntity.name;
+        // arkhamLabel이 함께 있으면 라벨을 이름 뒤에 병합
+        if (obj.arkhamLabel && obj.arkhamLabel.name) {
+          name = `${name} (${obj.arkhamLabel.name})`;
+        }
         entity = {
-          name: obj.arkhamEntity.name,
+          name,
           type: obj.arkhamEntity.type || '',
           service: obj.arkhamEntity.service || '',
           note: obj.arkhamEntity.note || '',
           chain,
         };
         break;
+      }
+    }
+    // 폴백: entity 없으면 arkhamLabel만으로 채움
+    if (!entity) {
+      for (const chain in d) {
+        const obj = d[chain];
+        if (obj && obj.arkhamLabel && obj.arkhamLabel.name) {
+          entity = {
+            name: obj.arkhamLabel.name,
+            type: 'label',
+            service: '',
+            note: obj.arkhamLabel.address || '',
+            chain,
+          };
+          break;
+        }
       }
     }
     try {
@@ -873,6 +897,12 @@ async function resolveArkham(addr) {
     return null;
   }
 }
+
+// 마이그레이션: 기존 null 결과 캐시 삭제 (arkhamLabel 폴백 반영 위해 재조회 필요)
+try {
+  const r = db.prepare('DELETE FROM arkham_cache WHERE name IS NULL').run();
+  if (r.changes > 0) console.log(`[arkham] cleared ${r.changes} null entries for re-lookup`);
+} catch (e) {}
 
 // ── LP 감지 DB (SQLite 영구 캐시) ──
 db.exec(`
