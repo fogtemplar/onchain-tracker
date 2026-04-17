@@ -1422,7 +1422,9 @@ async function handleLog(chain, log_, source) {
     }
 
     // 임계값 적용: DEX 풀 스왑(swappedToLP)만 임계값 면제, 나머지는 $100K+ 유지
-    if (!swappedToLP && usd < MIN_USD) return;
+    // DEX 스왑은 최소 $1K (폭주 방지), 일반은 $100K+
+    const effectiveMin = swappedToLP ? 1000 : MIN_USD;
+    if (usd < effectiveMin) return;
 
     // 발행량 %
     const supplyPct = meta.totalSupply > 0 ? (amt / meta.totalSupply * 100) : 0;
