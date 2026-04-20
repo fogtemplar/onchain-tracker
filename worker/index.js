@@ -21,6 +21,8 @@ const CMC_KEY     = process.env.CMC_KEY     || '7c23a703-55ff-4b19-babd-a4cf83aa
 const CG_API_KEY  = process.env.CG_API_KEY  || 'b745429f379948b8b715f6beded5c2ea';
 const ETH_KEY     = process.env.ETHERSCAN_KEY || 'MFC6RKPAYYCWID4YEH9ZM7FJWTZPY9HM4Z';
 const ARKHAM_KEY  = process.env.ARKHAM_KEY || '';
+// DEX 스왑 추적 기능 (크래시 원인 추적 중 임시 비활성화)
+const SWAP_TRACKING_ENABLED = process.env.SWAP_TRACKING === '1';
 
 // ── Chain config ──
 // WebSocket + HTTP: PublicNode 무료 → Alchemy CU 0
@@ -185,13 +187,17 @@ setInterval(() => {
 
 // 수령 지갑 추적 메모리 캐시 — key: chain:ca:addr → {at, usd, sym}
 const receiversCache = new Map();
-try {
-  const rows = stmtReceiverLoad.all(Date.now() - 30 * 86400 * 1000);
-  rows.forEach(r => {
-    receiversCache.set(`${r.chain}:${r.ca}:${r.addr}`, { at: r.received_at, usd: r.received_usd });
-  });
-  console.log(`[receivers_watch] loaded ${rows.length} watched wallets`);
-} catch (e) { console.warn('receivers load err:', e.message); }
+if (SWAP_TRACKING_ENABLED) {
+  try {
+    const rows = stmtReceiverLoad.all(Date.now() - 30 * 86400 * 1000);
+    rows.forEach(r => {
+      receiversCache.set(`${r.chain}:${r.ca}:${r.addr}`, { at: r.received_at, usd: r.received_usd });
+    });
+    console.log(`[receivers_watch] loaded ${rows.length} watched wallets`);
+  } catch (e) { console.warn('receivers load err:', e.message); }
+} else {
+  console.log('[receivers_watch] disabled (SWAP_TRACKING !== 1)');
+}
 
 // ── EXCLUDE list (메이저/스테이블) ──
 const EXCLUDE = new Set([
@@ -1358,9 +1364,9 @@ async function handleLog(chain, log_, source) {
     // CA 먼저 확보 (watched 지갑 체크를 위해)
     const ca = (log_.address || '').toLowerCase();
 
-    // watched wallet 체크: 최근 30일 내 이 토큰을 받았던 지갑이 송금 중이면 "DEX 스왑 의심"
+    // watched wallet 체크 (SWAP_TRACKING_ENABLED로 토글)
     const watchKey = `${chain}:${ca}:${from.toLowerCase()}`;
-    const watchedEntry = receiversCache.get(watchKey);
+    const watchedEntry = SWAP_TRACKING_ENABLED ? receiversCache.get(watchKey) : null;
     const isSwapBySender = !!watchedEntry;
 
     // DEX/Bridge/Aggregator 제외 (항상, Aggregator 스팸 방지)
@@ -1499,14 +1505,13 @@ async function handleLog(chain, log_, source) {
 
     // 수령 지갑 추적 등록 (receivers_watch, 30일)
     // 조건: 수신자가 거래소가 아니고 일반 지갑인 경우만
-    if (!toEx && r.tx_type !== 'cex_int') {
+    if (SWAP_TRACKING_ENABLED && !toEx && r.tx_type !== 'cex_int') {
       const watchKey2 = `${chain}:${ca}:${to.toLowerCase()}`;
       try {
         stmtReceiverUpsert.run({
           chain, ca, addr: to.toLowerCase(), sym: meta.symbol,
           at: r.ts, usd: r.usd,
         });
-        // 메모리 캐시 업데이트
         const existing = receiversCache.get(watchKey2);
         receiversCache.set(watchKey2, {
           at: r.ts,
